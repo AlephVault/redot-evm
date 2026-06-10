@@ -1,0 +1,28 @@
+<!--
+AlephVault.EVM HTML5 head include.
+
+Use this in the Web export preset's "Head Include" field, or copy it into a
+custom HTML shell before the Godot engine starts. It creates window.web3 from
+an injected EIP-1193 provider such as MetaMask so Godot's JavaScriptBridge can
+access it as window.web3.
+-->
+<script src="https://cdn.jsdelivr.net/npm/web3@1.10.4/dist/web3.min.js"></script>
+<script>
+(function () {
+	function initAlephVaultWeb3() {
+		if (!window.Web3 || !window.ethereum) {
+			return false;
+		}
+
+		window.web3 = new Web3(window.ethereum);
+		return true;
+	}
+
+	window.alephVaultEvmInitWeb3 = initAlephVaultWeb3;
+
+	if (!initAlephVaultWeb3()) {
+		window.addEventListener("ethereum#initialized", initAlephVaultWeb3, { once: true });
+		window.addEventListener("load", initAlephVaultWeb3, { once: true });
+	}
+}());
+</script>
