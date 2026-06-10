@@ -7,13 +7,25 @@ extends RefCounted
 ## The surface methods are defined here, and they're redirected to the
 ## underlying respective binding immediately.
 
+# The binding class. While a game is running, only a binding class will
+# be used for all the instances. This depends on whether the platform
+# is web (then, an EIP-1193-enabled binding will be used) or one of the
+# native formats (desktop or mobile).
 static var _binding_class: Script = null
 
-static func _get_binding_class() -> Script:
+static func _create_binding() -> Script:
 	if _binding_class != null:
-		return _binding_class
+		_binding_class = _binding_class
 
 	if OS.has_feature("web"):
-		return load("./bindings/web/index.gd")
+		_binding_class = load("./bindings/web/index.gd")
 	else:
-		return load("./bindings/native/index.gd")
+		_binding_class = load("./bindings/native/index.gd")
+
+	return _binding_class.new()
+
+# The binding for this facade in particular.
+var _binding = null
+
+def _init():
+	_binding = _binding_class.new()
