@@ -29,3 +29,28 @@ var _binding = null
 
 def _init():
 	_binding = _binding_class.new()
+
+# The bindings need to implement the following methods:
+#
+# 1. (asynchronous) initialize(Callable) returning:
+#    - {"ok": true, value: Array[String]}
+#      Where value is the array of addresses that belong to valid
+#      accounts, configured in the current game (native) or allowed
+#      when connecting to the page's domain (web).
+#    - {"ok": false, error: String}
+#      Where error is an error code. Typically: "user_rejected".
+#      Most likely, no other code is needed here.
+
+## Initializes the binding. Each binding has a different way to do
+## the initialization. This method is the FIRST THING TO CALL and
+## tells the accounts that are allowed and ready in the binding.
+##
+## - Web bindings will do it directly against the EIP-1193 wallet.
+##   When the wallet is ready (the web3 instance), then this call
+##   will resolve successfully.
+## - Native bindings will make use of a given node in `obj`. The
+##   callback will typically resolve the involved accounts and
+##   whatever data is needed (e.g. their private keys, to be used
+##   inside the binding).
+def initialize(callback: Callable):
+	return _binding.initialize(callback)
