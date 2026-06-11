@@ -26,7 +26,7 @@ static func _create_binding() -> Object:
 var _binding = null
 
 func _init():
-	_binding = _binding_class.new()
+	_binding = _create_binding()
 
 # The bindings need to implement the following methods:
 #
@@ -49,7 +49,7 @@ func _init():
 #      is "no_valid_chains", telling that no chain is actually
 #      configured.
 #
-# 2. (asynchronous) set_chain_id(chain_id: int) returning:
+# 3. (asynchronous) set_chain_id(chain_id: int) returning:
 #    - {"ok": true, value: null}
 #    - {"ok": false, error: String}
 #      Where error is an error code. Typically: "not_ready". This
@@ -78,7 +78,7 @@ func get_chain_id():
 	return _binding.get_chain_id()
 
 ## Sets the chain id for this binding. A binding is connected to
-## a single chain id at a given t ime, and that chain id may
+## a single chain id at a given time, and that chain id may
 ## change later.
 func set_chain_id(chain_id: int):
 	return _binding.set_chain_id(chain_id)
