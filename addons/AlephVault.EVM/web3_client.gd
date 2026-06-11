@@ -104,6 +104,14 @@ func _init():
 #      "invalid_tx_hash" (for when the hash is invalid or the
 #      client is not ready, even in the case that the initialization
 #      failed).
+#
+# 10. (asynchronous) request(method: String, params: Array) returning:
+#     - {"ok": true, value: Variant}
+#       Where value is a valid JSON-compatible value. The syntax and
+#       semantics is defined by the underlying RPC execution.
+#     - {"ok": false, error: Variant}
+#       Where error is a valid JSON-compatible value. The syntax and
+#       semantics is defined by the underlying RPC execution.
 
 # --------- Essential, non-contract, methods ---------
 
@@ -177,3 +185,10 @@ func transfer(address: String, amount: String, tx_config):
 ## result or the revert details.
 func wait_for(tx_hash: String):
 	return _binding.wait_for(tx_hash)
+
+## Performs an arbitrary RPC, supported by the underlying binding
+## or the underlying node. Certain requests are handled only by
+## the binding, while the huge majority are forwarded to the node
+## the binding is connected to.
+func request(method: String, params: Array):
+	return _binding.request(method, params)
