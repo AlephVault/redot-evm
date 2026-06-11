@@ -30,6 +30,8 @@ func _init():
 
 # The bindings need to implement the following methods:
 #
+# --------- Essential, non-contract, methods ---------
+#
 # 1. (asynchronous) initialize(Callable) returning:
 #    - {"ok": true, value: Array[String]}
 #      Where value is the array of addresses that belong to valid
@@ -60,7 +62,7 @@ func _init():
 #
 # 4. (asynchronous) get_accounts() returning:
 #    - {"ok": true, value: Array[String]}
-#    - {"ok": false}, error: String}
+#    - {"ok": false, error: String}
 #      Where error is an error code. Typically: "not_ready". This
 #      means this client is not ready yet (even in the case that
 #      the initialization failed).
@@ -73,6 +75,37 @@ func _init():
 #    Where accounts stands for a valid, non-empty, array of
 #    addresses. Those addresses are configured in the underlying
 #    binding's engine.
+#
+# 7. (asynchronous) get_balance(address: String) returning:
+#    - {"ok": true, value: String}
+#      Where the value is a numeric string. A big number, like
+#      1000000000000000000 representing 1 ether.
+#    - {"ok": false, error: String}
+#      Where error is an error code. Typically: "not_ready". This
+#      means this client is not ready yet (even in the case that
+#      the initialization failed). Alternatively, "invalid_address"
+#      if the address is not valid or is 0x000...000.
+#
+# 8. (asynchronous) transfer(address: String, amount: String, tx_config: Variant) returning:
+#    - {"ok": true, value: String}
+#      Where value is the tx. hash.
+#    - {"ok": false, error: String}
+#      Where error is an error code. Many errors can occur here, like
+#      "not_ready" if the client is not ready yet, "invalid_address"
+#      if the address is not valid or "0x000...000" or "invalid_amount"
+#      if the amount is not a numeric string.
+#
+# 9. (asynchronous) wait_for(tx_hash: String) returning:
+#    - {"ok": true, value: Dictionary}
+#      Where value is the full tx. result object.
+#    - {"ok": false, error: String | Dictionary}
+#      Where the error is a dictionary with the revert details.
+#      Alternatively, it can be a string like "not_ready" or even
+#      "invalid_tx_hash" (for when the hash is invalid or the
+#      client is not ready, even in the case that the initialization
+#      failed).
+
+# --------- Essential, non-contract, methods ---------
 
 ## Initializes the binding. Each binding has a different way to do
 ## the initialization. This method is the FIRST THING TO CALL and
@@ -124,3 +157,23 @@ var chain_changed:
 		return _binding.chain_changed
 	set(value):
 		push_error("chain_changed cannot be set this way")
+
+## Gets the balance of an account in the current chain id set
+## in this binding. The returned balance is a numeric string.
+## In the end, this involves a call to eth_getBalance RPC
+## method.
+func get_balance(address: String):
+	return _binding.get_balance(address)
+
+## Transfers balance to another address. The source address is
+## specified in the tx_config (the from: argument). The target
+## address and the balance are specified as the first & second
+## arguments and must be a valid, non-zero, address and a valid,
+## numeric and available, string.
+func transfer(address: String, amount: String, tx_config):
+	return _binding.transfer(address, amount, tx_config)
+
+## Waits for a transaction. Returns either the transaction's
+## result or the revert details.
+func wait_for(tx_hash: String):
+	return _binding.wait_for(tx_hash)
