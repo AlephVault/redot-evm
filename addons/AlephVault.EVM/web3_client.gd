@@ -40,6 +40,24 @@ def _init():
 #    - {"ok": false, error: String}
 #      Where error is an error code. Typically: "user_rejected".
 #      Most likely, no other code is needed here.
+#
+# 2. (asynchronous) get_chain_id() returning:
+#    - {"ok": true, value: int}
+#      Where value is the id of the current chain. It will be
+#      0 if this client is not connected to any chain.
+#    - {"ok": false, error: String}
+#      Where error is an error code. Typically: "not_ready". This
+#      means this client is not ready yet. Another possible option
+#      is "no_valid_chains", telling that no chain is actually
+#      configured.
+#
+# 2. (asynchronous) set_chain_id(chain_id: int) returning:
+#    - {"ok": true, value: null}
+#    - {"ok": false, error: String}
+#      Where error is an error code. Typically: "not_ready". This
+#      means this client is not ready yet. Another possible option
+#      is "invalid_chain", meaning that either the ID is invalid
+#      or does not belong to a configured chain.
 
 ## Initializes the binding. Each binding has a different way to do
 ## the initialization. This method is the FIRST THING TO CALL and
@@ -54,3 +72,15 @@ def _init():
 ##   inside the binding).
 def initialize(callback: Callable):
 	return _binding.initialize(callback)
+
+## Returns the chain id for this binding. A binding is connected
+## to a single chain id at a given time, and that chain id may
+## change later.
+def get_chain_id():
+	return _binding.get_chain_id()
+
+## Sets the chain id for this binding. A binding is connected to
+## a single chain id at a given t ime, and that chain id may
+## change later.
+def set_chain_id(chain_id: int):
+	return _binding.get_chain_id(chain_id)
