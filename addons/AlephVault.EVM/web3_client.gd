@@ -134,6 +134,43 @@ func _init():
 #       Where error can be "incomplete_binding" if, somehow, the binding
 #       could not be created (e.g. the native implementation is somehow
 #       not available). Also "not_found" if no ABI exists at given key.
+#
+# 13. abi_encode(args: Array) returning:
+#     - {"ok": true, "value": PackedByteArray}
+#       Where value is the standard ABI encoding of the provided
+#       arguments.
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding" if the binding could
+#       not be created, "invalid_args" if args is not a valid ABI
+#       argument list, "invalid_type" if an explicitly declared type
+#       is not a valid EVM type, or "invalid_value" if a value cannot
+#       be encoded for its resolved type.
+#
+# 14. abi_encode_packed(args: Array) returning:
+#     - {"ok": true, "value": PackedByteArray}
+#       Where value is the packed ABI encoding of the provided
+#       arguments.
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding", "invalid_args",
+#       "invalid_type", or "invalid_value". They're the same ones that
+#       were described for `abi_encode`.
+#
+# 15. abi_decode(args: PackedByteArray) returning:
+#     - {"ok": true, "value": Array}
+#       Where value contains the decoded values as non-dictionary
+#       elements.
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding", "invalid_args",
+#       "invalid_type", or "invalid_value".
+#
+# ABI encoding arguments are an array where each element can be:
+#    - A non-dictionary value to encode. The binding resolves the
+#      ABI type for this value.
+#    - A dictionary in the form {"type": String, "value": Variant}.
+#      The type must be a valid EVM type, such as "string" or
+#      "uint256", and value must be valid for that type.
+#
+# --------- Data-related methods ---------
 
 # --------- Essential, non-contract, methods ---------
 # These are essential methods related to managing sessions in the
@@ -235,3 +272,22 @@ func set_abi(key: String, abi: Array[Dictionary]):
 ## Gets an ABI registered by set_abi by certain key.
 func get_abi(key: String):
 	return _binding.get_abi(key)
+
+## Encodes an ABI argument list using standard ABI encoding.
+##
+## Each argument can be a plain value, or a dictionary in the form
+## {"type": String, "value": Variant} to force a specific EVM type.
+func abi_encode(args: Array):
+	return _binding.abi_encode(args)
+
+## Encodes an ABI argument list using packed ABI encoding.
+##
+## Each argument follows the same format as abi_encode(args).
+func abi_encode_packed(args: Array):
+	return _binding.abi_encode_packed(args)
+
+## Decodes ABI-encoded bytes and returns plain decoded values.
+func abi_decode(args: PackedByteArray):
+	return _binding.abi_decode(args)
+
+# --------- Data-related methods ---------
