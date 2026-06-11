@@ -37,7 +37,9 @@ func _init():
 #      when connecting to the page's domain (web).
 #    - {"ok": false, error: String}
 #      Where error is an error code. Typically: "user_rejected".
-#      Most likely, no other code is needed here.
+#      Other possible options are "no_valid_chains" if no chains
+#      are configured, or "no_valid_accounts" if no accounts are
+#      configured (neither by import nor by seed).
 #
 # 2. (asynchronous) get_chain_id() returning:
 #    - {"ok": true, value: int}
@@ -45,9 +47,8 @@ func _init():
 #      0 if this client is not connected to any chain.
 #    - {"ok": false, error: String}
 #      Where error is an error code. Typically: "not_ready". This
-#      means this client is not ready yet. Another possible option
-#      is "no_valid_chains", telling that no chain is actually
-#      configured.
+#      means this client is not ready yet (even in the case that
+#      the initialization failed).
 #
 # 3. (asynchronous) set_chain_id(chain_id: int) returning:
 #    - {"ok": true, value: null}
@@ -56,6 +57,13 @@ func _init():
 #      means this client is not ready yet. Another possible option
 #      is "invalid_chain", meaning that either the ID is invalid
 #      or does not belong to a configured chain.
+#
+# 4. (asynchronous) get_accounts() returning:
+#    - {"ok": true, value: Array[String]}
+#    - {"ok": false}, error: String}
+#      Where error is an error code. Typically: "not_ready". This
+#      means this client is not ready yet (even in the case that
+#      the initialization failed).
 
 ## Initializes the binding. Each binding has a different way to do
 ## the initialization. This method is the FIRST THING TO CALL and
@@ -82,3 +90,10 @@ func get_chain_id():
 ## change later.
 func set_chain_id(chain_id: int):
 	return _binding.set_chain_id(chain_id)
+
+## Gets the accounts for this binding. For simplicity, accounts
+## can only be retrieved by this interface, but they can however
+## be changed by external interfaces (in the case of EIP-1193
+## wallets).
+func get_accounts():
+	return _binding.get_accounts()
