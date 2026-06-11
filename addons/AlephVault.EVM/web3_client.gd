@@ -13,21 +13,19 @@ extends RefCounted
 # native formats (desktop or mobile).
 static var _binding_class: Script = null
 
-static func _create_binding() -> Script:
-	if _binding_class != null:
-		_binding_class = _binding_class
-
-	if OS.has_feature("web"):
-		_binding_class = load("./bindings/web/index.gd")
-	else:
-		_binding_class = load("./bindings/native/index.gd")
+static func _create_binding() -> Object:
+	if _binding_class == null:
+		if OS.has_feature("web"):
+			_binding_class = load("./bindings/web/index.gd")
+		else:
+			_binding_class = load("./bindings/native/index.gd")
 
 	return _binding_class.new()
 
 # The binding for this facade in particular.
 var _binding = null
 
-def _init():
+func _init():
 	_binding = _binding_class.new()
 
 # The bindings need to implement the following methods:
@@ -70,17 +68,17 @@ def _init():
 ##   callback will typically resolve the involved accounts and
 ##   whatever data is needed (e.g. their private keys, to be used
 ##   inside the binding).
-def initialize(callback: Callable):
+func initialize(callback: Callable):
 	return _binding.initialize(callback)
 
 ## Returns the chain id for this binding. A binding is connected
 ## to a single chain id at a given time, and that chain id may
 ## change later.
-def get_chain_id():
+func get_chain_id():
 	return _binding.get_chain_id()
 
 ## Sets the chain id for this binding. A binding is connected to
 ## a single chain id at a given t ime, and that chain id may
 ## change later.
-def set_chain_id(chain_id: int):
-	return _binding.get_chain_id(chain_id)
+func set_chain_id(chain_id: int):
+	return _binding.set_chain_id(chain_id)
