@@ -33,36 +33,39 @@ func _init():
 # --------- Essential, non-contract, methods ---------
 #
 # 1. (asynchronous) initialize(Callable) returning:
-#    - {"ok": true, value: Array[String]}
+#    - {"ok": true, "value": Array[String]}
 #      Where value is the array of addresses that belong to valid
 #      accounts, configured in the current game (native) or allowed
 #      when connecting to the page's domain (web).
-#    - {"ok": false, error: String}
+#    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "user_rejected".
 #      Other possible options are "no_valid_chains" if no chains
 #      are configured, or "no_valid_accounts" if no accounts are
-#      configured (neither by import nor by seed).
+#      configured (neither by import nor by seed). Another possible
+#      code is "incomplete_binding" if, somehow, the binding could
+#      not be created (e.g. the native implementation is somehow
+#      not available).
 #
 # 2. (asynchronous) get_chain_id() returning:
-#    - {"ok": true, value: int}
+#    - {"ok": true, "value": int}
 #      Where value is the id of the current chain. It will be
 #      0 if this client is not connected to any chain.
-#    - {"ok": false, error: String}
+#    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "not_ready". This
 #      means this client is not ready yet (even in the case that
 #      the initialization failed).
 #
 # 3. (asynchronous) set_chain_id(chain_id: int) returning:
-#    - {"ok": true, value: null}
-#    - {"ok": false, error: String}
+#    - {"ok": true, "value": null}
+#    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "not_ready". This
 #      means this client is not ready yet. Another possible option
 #      is "invalid_chain", meaning that either the ID is invalid
 #      or does not belong to a configured chain.
 #
 # 4. (asynchronous) get_accounts() returning:
-#    - {"ok": true, value: Array[String]}
-#    - {"ok": false, error: String}
+#    - {"ok": true, "value": Array[String]}
+#    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "not_ready". This
 #      means this client is not ready yet (even in the case that
 #      the initialization failed).
@@ -77,28 +80,28 @@ func _init():
 #    binding's engine.
 #
 # 7. (asynchronous) get_balance(address: String) returning:
-#    - {"ok": true, value: String}
+#    - {"ok": true, "value": String}
 #      Where the value is a numeric string. A big number, like
 #      1000000000000000000 representing 1 ether.
-#    - {"ok": false, error: String}
+#    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "not_ready". This
 #      means this client is not ready yet (even in the case that
 #      the initialization failed). Alternatively, "invalid_address"
 #      if the address is not valid or is 0x000...000.
 #
 # 8. (asynchronous) transfer(address: String, amount: String, tx_config: Variant) returning:
-#    - {"ok": true, value: String}
+#    - {"ok": true, "value": String}
 #      Where value is the tx. hash.
-#    - {"ok": false, error: String}
+#    - {"ok": false, "error": String}
 #      Where error is an error code. Many errors can occur here, like
 #      "not_ready" if the client is not ready yet, "invalid_address"
 #      if the address is not valid or "0x000...000" or "invalid_amount"
 #      if the amount is not a numeric string.
 #
 # 9. (asynchronous) wait_for(tx_hash: String) returning:
-#    - {"ok": true, value: Dictionary}
+#    - {"ok": true, "value": Dictionary}
 #      Where value is the full tx. result object.
-#    - {"ok": false, error: String | Dictionary}
+#    - {"ok": false, "error": String | Dictionary}
 #      Where the error is a dictionary with the revert details.
 #      Alternatively, it can be a string like "not_ready" or even
 #      "invalid_tx_hash" (for when the hash is invalid or the
@@ -106,14 +109,35 @@ func _init():
 #      failed).
 #
 # 10. (asynchronous) request(method: String, params: Array) returning:
-#     - {"ok": true, value: Variant}
+#     - {"ok": true, "value": Variant}
 #       Where value is a valid JSON-compatible value. The syntax and
 #       semantics is defined by the underlying RPC execution.
-#     - {"ok": false, error: Variant}
+#     - {"ok": false, "error": Variant}
 #       Where error is a valid JSON-compatible value. The syntax and
 #       semantics is defined by the underlying RPC execution.
+#
+# --------- ABI-related methods ---------
+#
+# 11. set_abi(key: String, abi: Array[Dictionary]) returning:
+#     - {"ok": true, "value": null}
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding" if, somehow, the binding
+#       could not be created (e.g. the native implementation is somehow
+#       not available). Also, "invalid_abi" if the ABI does not have the
+#       appropriate format or is an empty array, or "invalid_key" if
+#       the key is not a [a-zA-Z0-9_]+ identifier.
+#
+# 12. get_abi(key: String) returning:
+#     - {"ok": true, "value": Array[Dictionary]}
+#       Where value is the ABI that was set in a previous set_abi call.
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding" if, somehow, the binding
+#       could not be created (e.g. the native implementation is somehow
+#       not available). Also "not_found" if no ABI exists at given key.
 
 # --------- Essential, non-contract, methods ---------
+# These are essential methods related to managing sessions in the
+# wallet: accounts, current chain, and balance.
 
 ## Initializes the binding. Each binding has a different way to do
 ## the initialization. This method is the FIRST THING TO CALL and
@@ -192,3 +216,22 @@ func wait_for(tx_hash: String):
 ## the binding is connected to.
 func request(method: String, params: Array):
 	return _binding.request(method, params)
+
+# --------- ABI-related methods ---------
+# These methods are not necessarily standard methods, but the underlying
+# idea involves managing the ABIs we care about. These might relate to
+# one or more contracts each, and they're all managed by the bindings
+# themselves, once they are registered.
+
+## Sets a certain ABI inside the binding, to be used later. This method
+## should be invoked before initializing the binding, although it's safe
+## to invoke it after initialization.
+##
+## ABIs set like this can be used later to interact with smart contracts:
+## encoding method call, decoding results, and decoding events.
+func set_abi(key: String, abi: Array[Dictionary]):
+	return _binding.set_abi(key, abi)
+
+## Gets an ABI registered by set_abi by certain key.
+func get_abi(key: String):
+	return _binding.get_abi(key)
