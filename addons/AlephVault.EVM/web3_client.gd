@@ -64,6 +64,15 @@ func _init():
 #      Where error is an error code. Typically: "not_ready". This
 #      means this client is not ready yet (even in the case that
 #      the initialization failed).
+#
+# 5. signal chain_changed(chain_id: int)
+#    Where chain_id stands for a valid, non-zero, id of a chain
+#    already configured in the underlying binding's engine.
+#
+# 6. signal accounts_changed(accounts: Array[String])
+#    Where accounts stands for a valid, non-empty, array of
+#    addresses. Those addresses are configured in the underlying
+#    binding's engine.
 
 ## Initializes the binding. Each binding has a different way to do
 ## the initialization. This method is the FIRST THING TO CALL and
@@ -97,3 +106,21 @@ func set_chain_id(chain_id: int):
 ## wallets).
 func get_accounts():
 	return _binding.get_accounts()
+
+## A signal accounts_changed(accounts: Array[String]) to track
+## when the accounts were changed by an external interface (most
+## likely, a browser extension).
+var accounts_changed:
+	get:
+		return _binding.accounts_changed
+	set(value):
+		push_error("accounts_changed cannot be set this way")
+
+## A signal chain_changed(chain_id: int) to track when the chain
+## was changed by an external interface (most likely, a browser
+## extension) or a call of set_chain_id(chain_id).
+var chain_changed:
+	get:
+		return _binding.chain_changed
+	set(value):
+		push_error("chain_changed cannot be set this way")
