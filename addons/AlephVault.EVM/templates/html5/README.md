@@ -1,4 +1,4 @@
-S# AlephVault.EVM HTML5 Template
+# AlephVault.EVM HTML5 Template
 
 Use `web3-head-include.html` in the Web export preset's `Head Include` field,
 or copy its contents into a custom HTML shell before the Godot engine starts.
