@@ -155,13 +155,14 @@ func _init():
 #       "invalid_type", or "invalid_value". They're the same ones that
 #       were described for `abi_encode`.
 #
-# 15. abi_decode(args: PackedByteArray) returning:
+# 15. abi_decode(args: PackedByteArray, spec: Array) returning:
 #     - {"ok": true, "value": Array}
 #       Where value contains the decoded values as non-dictionary
 #       elements.
 #     - {"ok": false, "error": String}
 #       Where error can be "incomplete_binding", "invalid_args",
-#       "invalid_type", or "invalid_value".
+#       "invalid_type", "invalid_value", or "invalid_spec" if spec
+#       is not a valid ABI type specification array.
 #
 # ABI encoding arguments are an array where each element can be:
 #    - A non-dictionary value to encode. The binding resolves the
@@ -170,7 +171,47 @@ func _init():
 #      The type must be a valid EVM type, such as "string" or
 #      "uint256", and value must be valid for that type.
 #
+# ABI decoding spec is an array where each element can be:
+#    - A string with a valid EVM type, such as "string" or "uint256".
+#    - A dictionary describing an ABI type, using keys such as "type",
+#      "internalType", "components", and "name".
+#
 # --------- Data-related methods ---------
+#
+# 16. keccak256(b: PackedByteArray) returning:
+#     - {"ok": true, "value": PackedByteArray}
+#       Where value is exactly 32 bytes.
+#     This method always succeeds when b is a PackedByteArray.
+#
+# 17. from_wei(amount: String, unit: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is the amount converted from wei into unit.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_amount" if amount is not a valid
+#       numeric string, or "invalid_unit" if unit is not supported.
+#
+# 18. to_wei(amount: String, unit: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is the amount converted from unit into wei.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_amount" if amount is not a valid
+#       numeric string, or "invalid_unit" if unit is not supported.
+#
+# 19. from_hex(hex: String) returning:
+#     - {"ok": true, "value": PackedByteArray}
+#       Where value is the decoded byte array. "" and "0x" decode
+#       successfully into an empty PackedByteArray.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_hex" if hex contains non-hex
+#       characters, a misplaced 0x prefix, an odd number of hex digits,
+#       or another invalid hex representation.
+#
+# 20. to_checksum_address(address: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is the EIP-55 checksummed address.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_address" if address is not in the
+#       0x-prefixed 40-hex-digit address format.
 
 # --------- Essential, non-contract, methods ---------
 # These are essential methods related to managing sessions in the
@@ -286,8 +327,40 @@ func abi_encode(args: Array):
 func abi_encode_packed(args: Array):
 	return _binding.abi_encode_packed(args)
 
-## Decodes ABI-encoded bytes and returns plain decoded values.
-func abi_decode(args: PackedByteArray):
-	return _binding.abi_decode(args)
+## Decodes ABI-encoded bytes according to the provided ABI type spec.
+##
+## Each spec element can be a valid EVM type string, or a dictionary
+## describing an ABI type with keys such as "type", "internalType",
+## "components", and "name".
+func abi_decode(args: PackedByteArray, spec: Array):
+	return _binding.abi_decode(args, spec)
 
 # --------- Data-related methods ---------
+
+## Computes the Keccak-256 digest of the provided bytes.
+##
+## This always succeeds when b is a PackedByteArray. The returned value
+## is exactly 32 bytes.
+func keccak256(b: PackedByteArray):
+	return _binding.keccak256(b)
+
+## Converts a wei-denominated numeric string into another EVM unit.
+func from_wei(amount: String, unit: String):
+	return _binding.from_wei(amount, unit)
+
+## Converts a numeric string from an EVM unit into wei.
+func to_wei(amount: String, unit: String):
+	return _binding.to_wei(amount, unit)
+
+## Decodes a hex string into bytes.
+##
+## Valid input is composed of an even number of hex digits, optionally
+## prefixed by 0x. Empty strings and "0x" return an empty PackedByteArray.
+func from_hex(hex: String):
+	return _binding.from_hex(hex)
+
+## Converts an address into its EIP-55 checksum representation.
+##
+## Valid addresses are 0x-prefixed and contain exactly 40 hex digits.
+func to_checksum_address(address: String):
+	return _binding.to_checksum_address(address)
