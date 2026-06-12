@@ -146,7 +146,7 @@ func _init():
 #      the initialization failed). Alternatively, "invalid_address"
 #      if the address is not valid or is 0x000...000.
 #
-# 8. (asynchronous) transfer(address: String, amount: String, tx_config: Variant) returning:
+# 8. (asynchronous) transfer(address: String, amount: String, tx_config: Dictionary) returning:
 #    - {"ok": true, "value": String}
 #      Where value is the tx. hash.
 #    - {"ok": false, "error": String}
@@ -154,6 +154,12 @@ func _init():
 #      "not_ready" if the client is not ready yet, "invalid_address"
 #      if the address is not valid or "0x000...000" or "invalid_amount"
 #      if the amount is not a numeric string.
+#    tx_config is a JSON-serializable EVM transaction configuration
+#    dictionary. Standard keys include "from", "gas", "gasPrice",
+#    "maxFeePerGas", "maxPriorityFeePerGas", "nonce", and "chainId".
+#    Bindings may accept extra provider/native-specific keys. transfer()
+#    sets "to" and "value" from address and amount, so callers should not
+#    rely on conflicting tx_config values for those keys.
 #
 # 9. (asynchronous) wait_for(tx_hash: String) returning:
 #    - {"ok": true, "value": Dictionary}
@@ -362,6 +368,10 @@ func _init():
 #       underlying RPC/provider error.
 #     The method can be a function name, or an ABI entry dictionary of
 #     type "function". The binding resolves overloads.
+#     tx_params uses the same JSON-serializable EVM transaction
+#     configuration dictionary syntax as transfer()'s tx_config. Standard
+#     keys include "from", "gas", "gasPrice", "maxFeePerGas",
+#     "maxPriorityFeePerGas", "nonce", "chainId", and "value".
 #
 # 31. (asynchronous) contract_get_events(
 #       address: String, event: String | Dictionary, topics: Array | Dictionary,
@@ -453,12 +463,16 @@ var chain_changed:
 func get_balance(address: String):
 	return _binding.get_balance(address)
 
-## Transfers balance to another address. The source address is
-## specified in the tx_config (the from: argument). The target
-## address and the balance are specified as the first & second
-## arguments and must be a valid, non-zero, address and a valid,
-## numeric and available, string.
-func transfer(address: String, amount: String, tx_config):
+## Transfers wei to a valid non-zero EVM address.
+##
+## amount is a decimal numeric string denominated in wei. tx_config is a
+## JSON-serializable EVM transaction configuration dictionary. Standard keys
+## include "from", "gas", "gasPrice", "maxFeePerGas",
+## "maxPriorityFeePerGas", "nonce", and "chainId"; bindings may accept extra
+## provider/native-specific keys. transfer() sets "to" and "value" from
+## address and amount, so callers should not rely on conflicting tx_config
+## values for those keys.
+func transfer(address: String, amount: String, tx_config: Dictionary):
 	return _binding.transfer(address, amount, tx_config)
 
 ## Waits for a transaction. Returns either the transaction's
@@ -641,7 +655,10 @@ func contract_create(address: String, abi_key: String):
 ## Invokes a contract method.
 ##
 ## Method can be a function name or an ABI entry dictionary of type
-## "function". Params and tx_params are interpreted by the binding.
+## "function". Params are passed to the contract method builder. tx_params uses
+## the same JSON-serializable EVM transaction configuration dictionary syntax
+## as transfer()'s tx_config. Standard keys include "from", "gas", "gasPrice",
+## "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "chainId", and "value".
 func contract_invoke(address: String, method: Variant, params: Array, tx_params: Dictionary):
 	return _binding.contract_invoke(address, method, params, tx_params)
 

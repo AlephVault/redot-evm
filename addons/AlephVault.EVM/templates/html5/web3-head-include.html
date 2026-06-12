@@ -9,6 +9,27 @@ access it as window.web3.
 <script src="https://cdn.jsdelivr.net/npm/web3@1.10.4/dist/web3.min.js"></script>
 <script>
 (function () {
+	const abiCache = {};
+	const contractCache = {};
+	let nextAsyncId = 1;
+	const pendingAsync = {};
+
+	function success(value) {
+		return { ok: true, value: value };
+	}
+
+	function failed(error) {
+		return { ok: false, error: error };
+	}
+
+	function reject(error) {
+		return Promise.reject(error);
+	}
+
+	function hasWeb3() {
+		return !!(window.Web3 && window.ethereum && window.web3);
+	}
+
 	function initAlephVaultWeb3() {
 		if (!window.Web3 || !window.ethereum) {
 			return false;
@@ -55,11 +76,351 @@ access it as window.web3.
 		}
 	}
 
-	var nextAsyncId = 1;
-	var pendingAsync = {};
+	function normalizeAddress(address) {
+		return String(address || "").toLowerCase();
+	}
+
+	function isNonZeroAddress(address) {
+		if (!hasWeb3() || !window.web3.utils.isAddress(address)) {
+			return false;
+		}
+		return normalizeAddress(address) !== "0x0000000000000000000000000000000000000000";
+	}
+
+	function isValidAbi(abi) {
+		return Array.isArray(abi) && abi.length > 0;
+	}
+
+	function isValidKey(key) {
+		return /^[a-zA-Z0-9_]+$/.test(String(key || ""));
+	}
+
+	function typeOfAbiEntry(entry) {
+		return entry && typeof entry === "object" ? entry.type : null;
+	}
+
+	function functionSignature(entry) {
+		return entry.name + "(" + (entry.inputs || []).map(function (input) {
+			return input.type;
+		}).join(",") + ")";
+	}
+
+	function eventSignature(entry) {
+		return entry.name + "(" + (entry.inputs || []).map(function (input) {
+			return input.type;
+		}).join(",") + ")";
+	}
+
+	function findAbiEntry(abi, kind, selector) {
+		if (typeof selector === "string") {
+			for (let i = 0; i < abi.length; i++) {
+				if (abi[i] && abi[i].type === kind && abi[i].name === selector) {
+					return abi[i];
+				}
+			}
+			return null;
+		}
+
+		if (selector && typeof selector === "object" && selector.type === kind) {
+			const selectorSignature = (kind === "function" ? functionSignature : eventSignature)(selector);
+			for (let j = 0; j < abi.length; j++) {
+				if (abi[j] && abi[j].type === kind && (kind === "function" ? functionSignature(abi[j]) : eventSignature(abi[j])) === selectorSignature) {
+					return abi[j];
+				}
+			}
+		}
+
+		return null;
+	}
+
+	function inferType(value) {
+		if (typeof value === "boolean") {
+			return "bool";
+		}
+		if (typeof value === "number" || typeof value === "bigint") {
+			return "uint256";
+		}
+		if (typeof value === "string") {
+			return /^0x[0-9a-fA-F]*$/.test(value) ? "bytes" : "string";
+		}
+		if (Array.isArray(value)) {
+			return "bytes";
+		}
+		return null;
+	}
+
+	function normalizeAbiArg(arg) {
+		if (arg && typeof arg === "object" && !Array.isArray(arg) && Object.prototype.hasOwnProperty.call(arg, "type") && Object.prototype.hasOwnProperty.call(arg, "value")) {
+			return { type: arg.type, value: arg.value };
+		}
+
+		return { type: inferType(arg), value: arg };
+	}
+
+	function abiTypesAndValues(args) {
+		const types = [];
+		const values = [];
+		for (let i = 0; i < args.length; i++) {
+			const item = normalizeAbiArg(args[i]);
+			if (!item.type) {
+				throw "invalid_type";
+			}
+			types.push(item.type);
+			values.push(item.value);
+		}
+		return { types: types, values: values };
+	}
+
+	function specTypes(spec) {
+		if (!Array.isArray(spec)) {
+			throw "invalid_spec";
+		}
+
+		return spec.map(function (item) {
+			if (typeof item === "string") {
+				return item;
+			}
+			if (item && typeof item === "object" && item.type) {
+				return item;
+			}
+			throw "invalid_spec";
+		});
+	}
+
+	function decodeParameters(types, encoded) {
+		const decoded = window.web3.eth.abi.decodeParameters(types, encoded);
+		const length = Number(decoded.__length__ || types.length || 0);
+		const values = [];
+		for (let i = 0; i < length; i++) {
+			values.push(decoded[i]);
+		}
+		return values;
+	}
+
+	function strip0x(value) {
+		return String(value || "").replace(/^0x/i, "");
+	}
+
+	function padEven(value) {
+		return value.length % 2 === 0 ? value : "0" + value;
+	}
+
+	function leftPadHex(value, bytes) {
+		const length = bytes * 2;
+		if (value.length > length) {
+			throw "invalid_value";
+		}
+		return value.padStart(length, "0");
+	}
+
+	function twosComplement(value, bits) {
+		let bn = window.web3.utils.toBN(value);
+		const mod = window.web3.utils.toBN(2).pow(window.web3.utils.toBN(bits));
+		if (bn.isNeg()) {
+			bn = mod.add(bn);
+		}
+		return bn.toString(16);
+	}
+
+	function packedEncodeOne(type, value) {
+		if (/^uint([0-9]{0,3})$/.test(type)) {
+			const uintBits = Number(type.slice(4) || "256");
+			return leftPadHex(window.web3.utils.toBN(value).toString(16), uintBits / 8);
+		}
+		if (/^int([0-9]{0,3})$/.test(type)) {
+			const intBits = Number(type.slice(3) || "256");
+			return leftPadHex(twosComplement(value, intBits), intBits / 8);
+		}
+		if (type === "address") {
+			if (!window.web3.utils.isAddress(value)) {
+				throw "invalid_value";
+			}
+			return strip0x(value).toLowerCase();
+		}
+		if (type === "bool") {
+			return value ? "01" : "00";
+		}
+		if (type === "string") {
+			return strip0x(window.web3.utils.utf8ToHex(String(value)));
+		}
+		if (type === "bytes") {
+			if (!/^0x[0-9a-fA-F]*$/.test(String(value)) || strip0x(value).length % 2 !== 0) {
+				throw "invalid_value";
+			}
+			return strip0x(value);
+		}
+		if (/^bytes([1-9]|[12][0-9]|3[0-2])$/.test(type)) {
+			const size = Number(type.slice(5));
+			const bytes = strip0x(value);
+			if (!/^[0-9a-fA-F]*$/.test(bytes) || bytes.length !== size * 2) {
+				throw "invalid_value";
+			}
+			return bytes;
+		}
+		throw "invalid_type";
+	}
+
+	function packedEncode(args) {
+		return "0x" + (args || []).map(function (arg) {
+			const item = normalizeAbiArg(arg);
+			if (!item.type) {
+				throw "invalid_type";
+			}
+			return packedEncodeOne(item.type, item.value);
+		}).join("");
+	}
+
+	function contractEntry(address) {
+		return contractCache[normalizeAddress(address)] || null;
+	}
+
+	function methodRunner(contract, abi, method, params) {
+		const entry = findAbiEntry(abi, "function", method);
+		if (!entry) {
+			throw "invalid_method";
+		}
+
+		const name = typeof method === "string" ? method : functionSignature(entry);
+		let runner = contract.methods[name];
+		if (typeof runner !== "function") {
+			runner = contract.methods[functionSignature(entry)];
+		}
+		if (typeof runner !== "function") {
+			throw "invalid_method";
+		}
+
+		try {
+			return { entry: entry, method: runner.apply(contract.methods, params || []) };
+		} catch (_error) {
+			throw "invalid_params";
+		}
+	}
+
+	function sendAndResolveHash(promiEvent) {
+		return new Promise(function (resolve, rejectSend) {
+			promiEvent.once("transactionHash", resolve);
+			promiEvent.once("error", rejectSend);
+		});
+	}
+
+	function sleep(ms) {
+		return new Promise(function (resolve) {
+			setTimeout(resolve, ms);
+		});
+	}
+
+	function decodeLog(entry, log) {
+		try {
+			const decoded = window.web3.eth.abi.decodeLog(entry.inputs || [], log.data, (log.topics || []).slice(1));
+			const args = {};
+			(entry.inputs || []).forEach(function (input, index) {
+				args[input.name || String(index)] = decoded[input.name] !== undefined ? decoded[input.name] : decoded[index];
+			});
+			return { rawLog: log, name: entry.name, args: args };
+		} catch (_error) {
+			return { rawLog: log };
+		}
+	}
+
+	function matchingEventEntries(abi, event) {
+		if (event === null || event === undefined) {
+			return abi.filter(function (entry) { return entry && entry.type === "event"; });
+		}
+
+		const entry = findAbiEntry(abi, "event", event);
+		return entry ? [entry] : [];
+	}
+
+	function eventTopic(entry) {
+		return window.web3.utils.sha3(eventSignature(entry));
+	}
+
+	function normalizeTopics(entry, topics) {
+		if (topics === null || topics === undefined) {
+			return [];
+		}
+
+		if (Array.isArray(topics)) {
+			if (topics.length > 3) {
+				throw "invalid_topic";
+			}
+			return topics.map(function (topic) {
+				if (topic === null || topic === undefined) {
+					return null;
+				}
+				if (typeof topic === "string" && /^0x[0-9a-fA-F]{64}$/.test(topic)) {
+					return topic;
+				}
+				throw "invalid_topic";
+			});
+		}
+
+		if (topics && typeof topics === "object") {
+			const indexed = (entry.inputs || []).filter(function (input) { return !!input.indexed; });
+			const indexedNames = {};
+			indexed.forEach(function (input) {
+				indexedNames[input.name] = true;
+			});
+			Object.keys(topics).forEach(function (name) {
+				if (!indexedNames[name]) {
+					throw "invalid_topic";
+				}
+			});
+			return indexed.map(function (input) {
+				if (!Object.prototype.hasOwnProperty.call(topics, input.name)) {
+					return null;
+				}
+				try {
+					return window.web3.eth.abi.encodeParameter(input.type, topics[input.name]);
+				} catch (_error) {
+					throw "invalid_topic";
+				}
+			});
+		}
+
+		throw "invalid_topic";
+	}
+
+	function blockTagValue(tag) {
+		return tag;
+	}
+
+	function isQuantity(tag) {
+		return /^0x[0-9a-fA-F]+$/.test(String(tag));
+	}
+
+	function isBlockTag(tag) {
+		return tag === "earliest" || tag === "latest" || tag === "pending" || tag === "safe" || tag === "finalized" || isQuantity(tag);
+	}
+
+	function validateBlockRange(fromBlock, toBlock) {
+		if (!isBlockTag(fromBlock) || !isBlockTag(toBlock)) {
+			throw "invalid_block_tag";
+		}
+		if (!isQuantity(fromBlock) || !isQuantity(toBlock)) {
+			return;
+		}
+		if (window.web3.utils.toBN(fromBlock).gt(window.web3.utils.toBN(toBlock))) {
+			throw "invalid_block_range";
+		}
+	}
+
+	function wrapSync(fn) {
+		try {
+			return jsonStringify(success(fn()));
+		} catch (error) {
+			return jsonStringify(failed(normalizeError(error)));
+		}
+	}
+
+	function ensureReady() {
+		if (!hasWeb3()) {
+			throw "incomplete_binding";
+		}
+	}
 
 	window.alephVaultEvmProcessAsync = function (promise, callback) {
-		var id = nextAsyncId++;
+		const id = nextAsyncId++;
 		pendingAsync[id] = true;
 
 		Promise.resolve(promise).then(function (value) {
@@ -89,7 +450,324 @@ access it as window.web3.
 		return id;
 	};
 
+	window.alephVaultEvmWeb3 = {
+		setAbi: function (key, abi) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!isValidKey(key)) {
+					throw "invalid_key";
+				}
+				if (!isValidAbi(abi)) {
+					throw "invalid_abi";
+				}
+				abiCache[key] = abi;
+				return null;
+			});
+		},
+
+		getAbi: function (key) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!Object.prototype.hasOwnProperty.call(abiCache, key)) {
+					throw "not_found";
+				}
+				return abiCache[key];
+			});
+		},
+
+		getBalance: function (address) {
+			try {
+				ensureReady();
+				if (!isNonZeroAddress(address)) {
+					return reject("invalid_address");
+				}
+				return window.web3.eth.getBalance(address);
+			} catch (error) {
+				return reject(error);
+			}
+		},
+
+		transfer: function (address, amount, txConfig) {
+			try {
+				ensureReady();
+				if (!isNonZeroAddress(address)) {
+					return reject("invalid_address");
+				}
+				if (!/^[0-9]+$/.test(String(amount))) {
+					return reject("invalid_amount");
+				}
+
+				const tx = Object.assign({}, txConfig || {}, { to: address, value: amount });
+				return sendAndResolveHash(window.web3.eth.sendTransaction(tx));
+			} catch (error) {
+				return reject(error);
+			}
+		},
+
+		waitFor: async function (txHash) {
+			ensureReady();
+			if (!/^0x[0-9a-fA-F]{64}$/.test(String(txHash))) {
+				throw "invalid_tx_hash";
+			}
+
+			for (;;) {
+				const receipt = await window.web3.eth.getTransactionReceipt(txHash);
+				if (receipt) {
+					if (receipt.status === false || receipt.status === "0x0") {
+						throw receipt;
+					}
+					return receipt;
+				}
+				await sleep(1000);
+			}
+		},
+
+		contractCreate: function (address, abiKey) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!isNonZeroAddress(address)) {
+					throw "invalid_address";
+				}
+				if (!Object.prototype.hasOwnProperty.call(abiCache, abiKey)) {
+					throw "not_found";
+				}
+				contractCache[normalizeAddress(address)] = {
+					address: window.web3.utils.toChecksumAddress(address),
+					abiKey: abiKey,
+					abi: abiCache[abiKey],
+					contract: new window.web3.eth.Contract(abiCache[abiKey], address)
+				};
+				return null;
+			});
+		},
+
+		contractInvoke: function (address, method, params, txParams) {
+			try {
+				ensureReady();
+				const entry = contractEntry(address);
+				if (!entry) {
+					return reject("invalid_contract");
+				}
+
+				const runner = methodRunner(entry.contract, entry.abi, method, params || []);
+				const state = runner.entry.stateMutability || "nonpayable";
+				if (state === "view" || state === "pure" || runner.entry.constant) {
+					return runner.method.call(txParams || {});
+				}
+
+				return sendAndResolveHash(runner.method.send(txParams || {}));
+			} catch (error) {
+				return reject(error);
+			}
+		},
+
+		contractGetEvents: function (address, event, topics, fromBlock, toBlock) {
+			try {
+				ensureReady();
+				const entry = contractEntry(address);
+				if (!entry) {
+					return reject("invalid_contract");
+				}
+
+				const eventEntry = findAbiEntry(entry.abi, "event", event);
+				if (!eventEntry) {
+					return reject("invalid_event");
+				}
+
+				validateBlockRange(fromBlock, toBlock);
+				const filter = {
+					address: entry.address,
+					fromBlock: blockTagValue(fromBlock),
+					toBlock: blockTagValue(toBlock)
+				};
+				const topicValues = normalizeTopics(eventEntry, topics || []);
+				filter.topics = [eventTopic(eventEntry)].concat(topicValues);
+
+				return window.web3.eth.getPastLogs(filter).then(function (logs) {
+					return logs.map(function (log) {
+						return decodeLog(eventEntry, log);
+					});
+				});
+			} catch (error) {
+				return reject(error);
+			}
+		},
+
+		contractGetTxEvents: function (txObj, event) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!txObj || !Array.isArray(txObj.logs)) {
+					throw "invalid_tx";
+				}
+
+				const decoded = [];
+				let anyCandidate = event === null || event === undefined;
+				Object.keys(contractCache).forEach(function (address) {
+					if (matchingEventEntries(contractCache[address].abi, event).length > 0) {
+						anyCandidate = true;
+					}
+				});
+				if (!anyCandidate) {
+					throw "invalid_event";
+				}
+
+				(txObj.logs || []).forEach(function (log) {
+					const entry = contractEntry(log.address);
+					if (!entry) {
+						if (event === null || event === undefined) {
+							decoded.push({ rawLog: log });
+						}
+						return;
+					}
+
+					const candidates = matchingEventEntries(entry.abi, event);
+					let matched = false;
+					candidates.forEach(function (candidate) {
+						if ((log.topics || [])[0] === eventTopic(candidate)) {
+							decoded.push(decodeLog(candidate, log));
+							matched = true;
+						}
+					});
+
+					if (!matched && (event === null || event === undefined)) {
+						decoded.push({ rawLog: log });
+					}
+				});
+
+				return decoded;
+			});
+		},
+
+		abiEncode: function (args) {
+			return wrapSync(function () {
+				ensureReady();
+				const normalized = abiTypesAndValues(args || []);
+				return window.web3.eth.abi.encodeParameters(normalized.types, normalized.values);
+			});
+		},
+
+		abiEncodePacked: function (args) {
+			return wrapSync(function () {
+				ensureReady();
+				if (typeof window.web3.utils.encodePacked === "function") {
+					const normalized = (args || []).map(normalizeAbiArg);
+					return window.web3.utils.encodePacked.apply(window.web3.utils, normalized);
+				}
+				return packedEncode(args || []);
+			});
+		},
+
+		abiDecode: function (args, spec) {
+			return wrapSync(function () {
+				ensureReady();
+				return decodeParameters(specTypes(spec), args);
+			});
+		},
+
+		keccak256: function (hex) {
+			return wrapSync(function () {
+				ensureReady();
+				return window.web3.utils.keccak256(hex);
+			});
+		},
+
+		fromWei: function (amount, unit) {
+			return wrapSync(function () {
+				ensureReady();
+				return window.web3.utils.fromWei(amount, unit);
+			});
+		},
+
+		toWei: function (amount, unit) {
+			return wrapSync(function () {
+				ensureReady();
+				return window.web3.utils.toWei(amount, unit);
+			});
+		},
+
+		toChecksumAddress: function (address) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!window.web3.utils.isAddress(address)) {
+					throw "invalid_address";
+				}
+				return window.web3.utils.toChecksumAddress(address);
+			});
+		},
+
+		decimalToHex: function (decimal) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!/^[0-9]+$/.test(String(decimal))) {
+					throw "invalid_value";
+				}
+				return window.web3.utils.toHex(window.web3.utils.toBN(decimal));
+			});
+		},
+
+		hexToDecimal: function (hex) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!/^0x[0-9a-fA-F]+$/.test(String(hex))) {
+					throw "invalid_value";
+				}
+				return window.web3.utils.toBN(hex).toString(10);
+			});
+		},
+
+		validateUint: function (value, size) {
+			return wrapSync(function () {
+				ensureReady();
+				if (size % 8 !== 0 || size < 8 || size > 256) {
+					throw "invalid_size";
+				}
+				if (!/^[0-9]+$/.test(String(value))) {
+					throw "invalid_value";
+				}
+				const bn = window.web3.utils.toBN(value);
+				const max = window.web3.utils.toBN(2).pow(window.web3.utils.toBN(size));
+				if (bn.gte(max)) {
+					throw "invalid_value";
+				}
+				return null;
+			});
+		},
+
+		validateInt: function (value, size) {
+			return wrapSync(function () {
+				ensureReady();
+				if (size % 8 !== 0 || size < 8 || size > 256) {
+					throw "invalid_size";
+				}
+				if (!/^-?[0-9]+$/.test(String(value))) {
+					throw "invalid_value";
+				}
+				const bn = window.web3.utils.toBN(value);
+				const limit = window.web3.utils.toBN(2).pow(window.web3.utils.toBN(size - 1));
+				if (bn.lt(limit.neg()) || bn.gte(limit)) {
+					throw "invalid_value";
+				}
+				return null;
+			});
+		},
+
+		validateAddress: function (value, checksum) {
+			return wrapSync(function () {
+				ensureReady();
+				if (!/^(0x)?[0-9a-fA-F]{40}$/.test(String(value))) {
+					throw "invalid_value";
+				}
+				if (checksum && !window.web3.utils.checkAddressChecksum(value)) {
+					throw "invalid_value";
+				}
+				return null;
+			});
+		}
+	};
+
 	window.alephVaultEvmPendingAsync = pendingAsync;
+	window.alephVaultEvmAbiCache = abiCache;
+	window.alephVaultEvmContractCache = contractCache;
 	window.alephVaultEvmInitWeb3 = initAlephVaultWeb3;
 
 	if (!initAlephVaultWeb3()) {
