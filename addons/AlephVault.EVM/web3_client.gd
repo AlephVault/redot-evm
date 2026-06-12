@@ -336,6 +336,60 @@ func _init():
 #       must also satisfy the checksum rules. "incomplete_binding" can be
 #       returned if checksum validation is requested but the binding is
 #       not complete enough to compute/verify the checksum.
+#
+# --------- Contract-related methods ---------
+#
+# 29. contract_create(address: String, abi_key: String) returning:
+#     - {"ok": true, "value": null}
+#       Where the binding creates and stores a contract reference for the
+#       address and ABI, such as window.web3.Contract(...) in web builds.
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding" if the binding is not
+#       available, "invalid_address" if address is not a valid non-zero
+#       address, or "not_found" if abi_key does not match a registered ABI.
+#     This method is synchronous and only performs setup.
+#
+# 30. (asynchronous) contract_invoke(
+#       address: String, method: String | Dictionary, params: Array,
+#       tx_params: Dictionary
+#     ) returning:
+#     - {"ok": true, "value": Variant}
+#       Where value is a transaction hash String for payable/nonpayable
+#       methods, or an ABI-decoded value for view/pure methods.
+#     - {"ok": false, "error": String | Variant}
+#       Where error can be "incomplete_binding", "not_ready",
+#       "invalid_contract", "invalid_method", "invalid_params", or an
+#       underlying RPC/provider error.
+#     The method can be a function name, or an ABI entry dictionary of
+#     type "function". The binding resolves overloads.
+#
+# 31. (asynchronous) contract_get_events(
+#       address: String, event: String | Dictionary, topics: Array | Dictionary,
+#       from: String = "0x0", to: String = "latest"
+#     ) returning:
+#     - {"ok": true, "value": Array}
+#       Where value is an array of ABI-decoded events. It can be empty.
+#     - {"ok": false, "error": String | Variant}
+#       Where error can be "incomplete_binding", "not_ready",
+#       "invalid_contract", "invalid_event", "invalid_topic",
+#       "invalid_block_tag", "invalid_block_range", or an underlying
+#       RPC/provider error.
+#     The event can be an event name, or an ABI entry dictionary. The
+#     binding resolves overloads. Topics can be an array of up to three
+#     topic values, or a dictionary keyed by valid indexed field names.
+#
+# 32. contract_get_tx_events(
+#       tx_obj: Dictionary, event: String | Dictionary | null = null
+#     ) returning:
+#     - {"ok": true, "value": Array}
+#       Where value is an array of decoded events. If event is null, the
+#       binding returns all decodable events and raw entries for logs that
+#       cannot be decoded with the contract ABI.
+#     - {"ok": false, "error": String | Variant}
+#       Where error can be "incomplete_binding", "invalid_tx",
+#       "invalid_event", or "invalid_log".
+#     This method is synchronous and decodes events from a transaction
+#     object previously returned by wait_for().
 
 # --------- Essential, non-contract, methods ---------
 # These are essential methods related to managing sessions in the
@@ -574,3 +628,34 @@ func validate_bytes(value: Variant, size: int = 0):
 ## the address must also satisfy the checksum rules.
 func validate_address(value: String, checksum: bool = false):
 	return _binding.validate_address(value, checksum)
+
+# --------- Contract-related methods ---------
+
+## Creates and stores a binding-side contract reference for address and ABI.
+##
+## This is synchronous setup. The address must be valid and non-zero, and
+## abi_key must refer to a previously registered ABI.
+func contract_create(address: String, abi_key: String):
+	return _binding.contract_create(address, abi_key)
+
+## Invokes a contract method.
+##
+## Method can be a function name or an ABI entry dictionary of type
+## "function". Params and tx_params are interpreted by the binding.
+func contract_invoke(address: String, method: Variant, params: Array, tx_params: Dictionary):
+	return _binding.contract_invoke(address, method, params, tx_params)
+
+## Gets ABI-decoded events for a registered contract.
+##
+## Event can be an event name or an ABI entry dictionary. Topics can be an
+## array of up to three topic values, or a dictionary keyed by indexed field
+## names. Block tags follow validate_block_tag(tag).
+func contract_get_events(address: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
+	return _binding.contract_get_events(address, event, topics, from, to)
+
+## Decodes matching events from a transaction object returned by wait_for().
+##
+## If event is null, all decodable events are returned, with raw entries for
+## logs that cannot be decoded with the current contract ABI.
+func contract_get_tx_events(tx_obj: Dictionary, event: Variant = null):
+	return _binding.contract_get_tx_events(tx_obj, event)
