@@ -13,6 +13,63 @@ extends RefCounted
 # native formats (desktop or mobile).
 static var _binding_class: Script = null
 
+static func _success(value: Variant) -> Dictionary:
+	return {"ok": true, "value": value}
+
+static func _failed(error: String) -> Dictionary:
+	return {"ok": false, "error": error}
+
+static func _is_hex_code(code: int) -> bool:
+	return (code >= 48 and code <= 57) or (code >= 65 and code <= 70) or (code >= 97 and code <= 102)
+
+static func _hex_code_to_int(code: int) -> int:
+	if code >= 48 and code <= 57:
+		return code - 48
+	if code >= 65 and code <= 70:
+		return code - 55
+	return code - 87
+
+static func _strip_optional_0x(hex: String) -> String:
+	if hex.begins_with("0x"):
+		return hex.substr(2)
+	return hex
+
+static func _has_misplaced_0x(hex: String) -> bool:
+	return hex.find("0x", 1) != -1
+
+static func _is_even_hex(hex: String) -> bool:
+	if _has_misplaced_0x(hex):
+		return false
+
+	var stripped := _strip_optional_0x(hex)
+	if stripped.length() % 2 != 0:
+		return false
+
+	for i in range(stripped.length()):
+		if not _is_hex_code(stripped.unicode_at(i)):
+			return false
+
+	return true
+
+static func _is_prefixed_hex_quantity(hex: String) -> bool:
+	if not hex.begins_with("0x") or hex.length() == 2:
+		return false
+
+	if _has_misplaced_0x(hex):
+		return false
+
+	if hex.length() > 3 and hex.unicode_at(2) == 48:
+		return false
+
+	for i in range(2, hex.length()):
+		if not _is_hex_code(hex.unicode_at(i)):
+			return false
+
+	return true
+
+static func _is_named_block_tag(tag: String) -> bool:
+	return tag == "earliest" or tag == "latest" or tag == "pending" or tag == "safe" or tag == "finalized"
+
 static func _create_binding() -> Object:
 	if _binding_class == null:
 		if OS.has_feature("web"):
@@ -181,21 +238,27 @@ func _init():
 # 16. keccak256(b: PackedByteArray) returning:
 #     - {"ok": true, "value": PackedByteArray}
 #       Where value is exactly 32 bytes.
-#     This method always succeeds when b is a PackedByteArray.
+#     - {"ok": false, "error": String}
+#       Where error can be "incomplete_binding" if the binding is not
+#       complete enough to compute Keccak-256.
 #
 # 17. from_wei(amount: String, unit: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is the amount converted from wei into unit.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_amount" if amount is not a valid
-#       numeric string, or "invalid_unit" if unit is not supported.
+#       numeric string, "invalid_unit" if unit is not supported, or
+#       "incomplete_binding" if the binding is not complete enough to
+#       perform bigint unit conversions.
 #
 # 18. to_wei(amount: String, unit: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is the amount converted from unit into wei.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_amount" if amount is not a valid
-#       numeric string, or "invalid_unit" if unit is not supported.
+#       numeric string, "invalid_unit" if unit is not supported, or
+#       "incomplete_binding" if the binding is not complete enough to
+#       perform bigint unit conversions.
 #
 # 19. from_hex(hex: String) returning:
 #     - {"ok": true, "value": PackedByteArray}
@@ -211,23 +274,52 @@ func _init():
 #       Where value is the EIP-55 checksummed address.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_address" if address is not in the
-#       0x-prefixed 40-hex-digit address format.
+#       0x-prefixed 40-hex-digit address format, or "incomplete_binding"
+#       if the binding is not complete enough to compute the checksum.
 #
-# 21. validate_uint(value: String, size: int) returning:
+# 21. to_hex(value: PackedByteArray) returning:
+#     - {"ok": true, "value": String}
+#       Where value is a 0x-prefixed hex string.
+#
+# 22. decimal_to_hex(decimal: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is a 0x-prefixed hex string.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value" or "incomplete_binding" if the
+#       binding is not complete enough to perform bigint conversions.
+#
+# 23. hex_to_decimal(hex: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is a decimal numeric string.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value" or "incomplete_binding" if the
+#       binding is not complete enough to perform bigint conversions.
+#
+# 24. validate_block_tag(tag: String) returning:
+#     - {"ok": true, "value": null}
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value". Valid block tags are
+#       "earliest", "latest", "pending", "safe", "finalized", or a
+#       canonical 0x-prefixed hex quantity without leading zeroes
+#       except for "0x0".
+#
+# 25. validate_uint(value: String, size: int) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" if value is not a valid uint
 #       for the requested size, or "invalid_size" if size is not one of
-#       8, 16, ..., 256.
+#       8, 16, ..., 256, or "incomplete_binding" if the binding is not
+#       complete enough to validate bigint ranges.
 #
-# 22. validate_int(value: String, size: int) returning:
+# 26. validate_int(value: String, size: int) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" if value is not a valid int
 #       for the requested size, or "invalid_size" if size is not one of
-#       8, 16, ..., 256.
+#       8, 16, ..., 256, or "incomplete_binding" if the binding is not
+#       complete enough to validate bigint ranges.
 #
-# 23. validate_bytes(value: String | PackedByteArray, size: int = 0) returning:
+# 27. validate_bytes(value: String | PackedByteArray, size: int = 0) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" if value is not valid for
@@ -236,12 +328,14 @@ func _init():
 #       When size is 0, the hex digit count must be even. When size is
 #       1..32, the hex digit count must be exactly size * 2.
 #
-# 24. validate_address(value: String, checksum: bool = false) returning:
+# 28. validate_address(value: String, checksum: bool = false) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value". A valid address is a string
 #       matching (0x)?[0-9a-fA-F]{40}. When checksum is true, the address
-#       must also satisfy the checksum rules.
+#       must also satisfy the checksum rules. "incomplete_binding" can be
+#       returned if checksum validation is requested but the binding is
+#       not complete enough to compute/verify the checksum.
 
 # --------- Essential, non-contract, methods ---------
 # These are essential methods related to managing sessions in the
@@ -387,13 +481,53 @@ func to_wei(amount: String, unit: String):
 ## Valid input is composed of an even number of hex digits, optionally
 ## prefixed by 0x. Empty strings and "0x" return an empty PackedByteArray.
 func from_hex(hex: String):
-	return _binding.from_hex(hex)
+	if not _is_even_hex(hex):
+		return _failed("invalid_hex")
+
+	var stripped := _strip_optional_0x(hex)
+	var bytes := PackedByteArray()
+	for i in range(0, stripped.length(), 2):
+		var high := _hex_code_to_int(stripped.unicode_at(i))
+		var low := _hex_code_to_int(stripped.unicode_at(i + 1))
+		bytes.append(high * 16 + low)
+
+	return _success(bytes)
 
 ## Converts an address into its EIP-55 checksum representation.
 ##
 ## Valid addresses are 0x-prefixed and contain exactly 40 hex digits.
 func to_checksum_address(address: String):
 	return _binding.to_checksum_address(address)
+
+## Encodes bytes into a 0x-prefixed hex string.
+func to_hex(value: PackedByteArray):
+	var hex := "0x"
+	for byte in value:
+		hex += "%02x" % byte
+
+	return _success(hex)
+
+## Converts a decimal numeric string into a 0x-prefixed hex string.
+func decimal_to_hex(decimal: String):
+	return _binding.decimal_to_hex(decimal)
+
+## Converts a hex string into a decimal numeric string.
+func hex_to_decimal(hex: String):
+	return _binding.hex_to_decimal(hex)
+
+## Validates an EVM JSON-RPC block tag.
+##
+## Valid values are "earliest", "latest", "pending", "safe", "finalized",
+## or a canonical 0x-prefixed hex quantity without leading zeroes except
+## for "0x0".
+func validate_block_tag(tag: String):
+	if _is_named_block_tag(tag):
+		return _success(null)
+
+	if not _is_prefixed_hex_quantity(tag):
+		return _failed("invalid_value")
+
+	return _success(null)
 
 ## Validates an unsigned integer numeric string for uint<size>.
 ##
@@ -412,7 +546,27 @@ func validate_int(value: String, size: int):
 ## Value must be either PackedByteArray or a hex string with an optional
 ## 0x prefix. Size 0 means dynamic bytes; size 1..32 means bytes<size>.
 func validate_bytes(value: Variant, size: int = 0):
-	return _binding.validate_bytes(value, size)
+	if size < 0 or size > 32:
+		return _failed("invalid_size")
+
+	if value is PackedByteArray:
+		var bytes_value: PackedByteArray = value
+		if size != 0 and bytes_value.size() != size:
+			return _failed("invalid_value")
+		return _success(null)
+
+	if not (value is String):
+		return _failed("invalid_value")
+
+	var string_value: String = value
+	if not _is_even_hex(string_value):
+		return _failed("invalid_value")
+
+	var stripped := _strip_optional_0x(string_value)
+	if size != 0 and stripped.length() != size * 2:
+		return _failed("invalid_value")
+
+	return _success(null)
 
 ## Validates an EVM address string.
 ##
