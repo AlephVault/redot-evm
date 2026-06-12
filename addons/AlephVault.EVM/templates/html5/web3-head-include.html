@@ -15,9 +15,81 @@ access it as window.web3.
 		}
 
 		window.web3 = new Web3(window.ethereum);
+		window.web3.provider = window.ethereum;
 		return true;
 	}
 
+	function jsonStringify(value) {
+		return JSON.stringify(value, function (_key, item) {
+			return typeof item === "bigint" ? item.toString() : item;
+		});
+	}
+
+	function normalizeError(error) {
+		if (error instanceof Error) {
+			return {
+				name: error.name,
+				message: error.message,
+				code: error.code,
+				data: error.data,
+				stack: error.stack
+			};
+		}
+
+		if (error && typeof error === "object") {
+			return error;
+		}
+
+		return String(error);
+	}
+
+	function callbackWithJson(callback, payload) {
+		try {
+			callback(jsonStringify(payload));
+		} catch (error) {
+			callback(jsonStringify({
+				id: payload.id,
+				ok: false,
+				error: normalizeError(error)
+			}));
+		}
+	}
+
+	var nextAsyncId = 1;
+	var pendingAsync = {};
+
+	window.alephVaultEvmProcessAsync = function (promise, callback) {
+		var id = nextAsyncId++;
+		pendingAsync[id] = true;
+
+		Promise.resolve(promise).then(function (value) {
+			if (!pendingAsync[id]) {
+				return;
+			}
+
+			delete pendingAsync[id];
+			callbackWithJson(callback, {
+				id: id,
+				ok: true,
+				value: value
+			});
+		}).catch(function (error) {
+			if (!pendingAsync[id]) {
+				return;
+			}
+
+			delete pendingAsync[id];
+			callbackWithJson(callback, {
+				id: id,
+				ok: false,
+				error: normalizeError(error)
+			});
+		});
+
+		return id;
+	};
+
+	window.alephVaultEvmPendingAsync = pendingAsync;
 	window.alephVaultEvmInitWeb3 = initAlephVaultWeb3;
 
 	if (!initAlephVaultWeb3()) {

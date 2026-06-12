@@ -15,5 +15,9 @@ the snippet retries on the standard `ethereum#initialized` browser event and on
 page load. It also exposes `window.alephVaultEvmInitWeb3()` so the binding can
 retry explicitly before making Web3 calls.
 
+It also exposes `window.alephVaultEvmProcessAsync(promise, callback)`. The web
+binding uses it to attach `then`/`catch` handlers to JavaScript promises, assign
+request ids, and forward a JSON result back to Godot.
+
 For production builds, consider self-hosting the pinned `web3.min.js` asset
 instead of depending on the CDN at runtime.
