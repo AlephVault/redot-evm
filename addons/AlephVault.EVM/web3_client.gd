@@ -212,6 +212,36 @@ func _init():
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_address" if address is not in the
 #       0x-prefixed 40-hex-digit address format.
+#
+# 21. validate_uint(value: String, size: int) returning:
+#     - {"ok": true, "value": null}
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value" if value is not a valid uint
+#       for the requested size, or "invalid_size" if size is not one of
+#       8, 16, ..., 256.
+#
+# 22. validate_int(value: String, size: int) returning:
+#     - {"ok": true, "value": null}
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value" if value is not a valid int
+#       for the requested size, or "invalid_size" if size is not one of
+#       8, 16, ..., 256.
+#
+# 23. validate_bytes(value: String | PackedByteArray, size: int = 0) returning:
+#     - {"ok": true, "value": null}
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value" if value is not valid for
+#       bytes or bytesX, or "invalid_size" if size is not in 0..32.
+#       If value is a String, it must be hex with an optional 0x prefix.
+#       When size is 0, the hex digit count must be even. When size is
+#       1..32, the hex digit count must be exactly size * 2.
+#
+# 24. validate_address(value: String, checksum: bool = false) returning:
+#     - {"ok": true, "value": null}
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value". A valid address is a string
+#       matching (0x)?[0-9a-fA-F]{40}. When checksum is true, the address
+#       must also satisfy the checksum rules.
 
 # --------- Essential, non-contract, methods ---------
 # These are essential methods related to managing sessions in the
@@ -364,3 +394,29 @@ func from_hex(hex: String):
 ## Valid addresses are 0x-prefixed and contain exactly 40 hex digits.
 func to_checksum_address(address: String):
 	return _binding.to_checksum_address(address)
+
+## Validates an unsigned integer numeric string for uint<size>.
+##
+## Size must be one of 8, 16, ..., 256.
+func validate_uint(value: String, size: int):
+	return _binding.validate_uint(value, size)
+
+## Validates a signed integer numeric string for int<size>.
+##
+## Size must be one of 8, 16, ..., 256.
+func validate_int(value: String, size: int):
+	return _binding.validate_int(value, size)
+
+## Validates bytes or bytes<size>.
+##
+## Value must be either PackedByteArray or a hex string with an optional
+## 0x prefix. Size 0 means dynamic bytes; size 1..32 means bytes<size>.
+func validate_bytes(value: Variant, size: int = 0):
+	return _binding.validate_bytes(value, size)
+
+## Validates an EVM address string.
+##
+## Valid addresses match (0x)?[0-9a-fA-F]{40}. When checksum is true,
+## the address must also satisfy the checksum rules.
+func validate_address(value: String, checksum: bool = false):
+	return _binding.validate_address(value, checksum)
