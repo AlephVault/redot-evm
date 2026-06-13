@@ -274,7 +274,20 @@ func account_set_password(password: String):
 func set_chain(rpc_url: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	var response = _wallet.set_chain(rpc_url)
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return Async.failed("incomplete_binding")
+	var thread := Thread.new()
+	var start_error := thread.start(func():
+		return _wallet.set_chain(rpc_url)
+	)
+	if start_error != OK:
+		return Async.failed("os_error")
+	while thread.is_alive():
+		await tree.process_frame
+	var response = thread.wait_to_finish()
+	if not (response is Dictionary):
+		return Async.failed("incomplete_binding")
 	if not response.get("ok", false):
 		return response
 	var value = response.get("value", {})
@@ -282,10 +295,6 @@ func set_chain(rpc_url: String):
 		_config = value
 		_chain_id = int(_config.get("chain_id", 0))
 		_accounts = _config.get("accounts", _accounts)
-	var tree := Engine.get_main_loop() as SceneTree
-	if tree == null:
-		return Async.failed("incomplete_binding")
-	await tree.process_frame
 	return response
 
 func to_hex(value: PackedByteArray):
