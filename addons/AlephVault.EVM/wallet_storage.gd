@@ -26,6 +26,8 @@ const VERSION := 1
 const KDF_ITERATIONS := 50000
 const KDF_NAME := "pbkdf2-hmac-sha256"
 const SENTINEL_TEXT := "AlephVault.EVM.wallet_storage.v1"
+const VALIDATION_CHAIN_ID := 1
+const VALIDATION_RPC_URL := "https://ethereum-json-rpc.stakely.io"
 
 static var _singleton = null
 
@@ -47,10 +49,9 @@ static func _failed(error: String) -> Dictionary:
 	return {"ok": false, "error": error}
 
 func _init():
-	# Rationale: validating imported private keys should be available before
-	# the main native wallet binding is initialized. The Rust extension exposes
-	# validate_private_key without requiring wallet readiness, so storage can use
-	# a tiny private validator instance only for address derivation.
+	# Rationale: imported private keys still need native address derivation even
+	# though the public client API no longer exposes private-key inspection.
+	# Storage uses a private native wallet instance with a throwaway config.
 	if not OS.has_feature("web") and ClassDB.class_exists("AlephVaultEvmNativeWallet"):
 		_validator = ClassDB.instantiate("AlephVaultEvmNativeWallet")
 
@@ -178,7 +179,7 @@ func unlock(password: String) -> Dictionary:
 		if not (private_key is String):
 			_clear_key_material(keys["enc_key"], keys["mac_key"])
 			return _failed("invalid_password")
-		var validation := _validate_private_key(private_key)
+		var validation := _derive_private_key_address(private_key)
 		if not validation.get("ok", false):
 			_clear_key_material(keys["enc_key"], keys["mac_key"])
 			return _failed("invalid_storage")
@@ -245,7 +246,7 @@ func add_account(private_key: String, name: Variant = "") -> Dictionary:
 	var ready_response := _require_unlocked()
 	if not ready_response.get("ok", false):
 		return ready_response
-	var validation := _validate_private_key(private_key)
+	var validation := _derive_private_key_address(private_key)
 	if not validation.get("ok", false):
 		return _failed("invalid_private_key")
 
@@ -271,7 +272,7 @@ func update_account(private_key: String, name: Variant = "") -> Dictionary:
 	var ready_response := _require_unlocked()
 	if not ready_response.get("ok", false):
 		return ready_response
-	var validation := _validate_private_key(private_key)
+	var validation := _derive_private_key_address(private_key)
 	if not validation.get("ok", false):
 		return _failed("invalid_private_key")
 
@@ -291,7 +292,7 @@ func remove_account(private_key: String) -> Dictionary:
 	var ready_response := _require_unlocked()
 	if not ready_response.get("ok", false):
 		return ready_response
-	var validation := _validate_private_key(private_key)
+	var validation := _derive_private_key_address(private_key)
 	if not validation.get("ok", false):
 		return _failed("invalid_private_key")
 
@@ -422,10 +423,23 @@ func _save_contents(contents: Dictionary) -> Dictionary:
 		DirAccess.remove_absolute(STORAGE_BAK_PATH)
 	return _success(null)
 
-func _validate_private_key(private_key: String) -> Dictionary:
+func _derive_private_key_address(private_key: String) -> Dictionary:
 	if _validator == null:
 		return _failed("incomplete_binding")
-	return _validator.validate_private_key(private_key)
+	var response = _validator.initialize(JSON.stringify({
+		"chain_id": VALIDATION_CHAIN_ID,
+		"rpc_url": VALIDATION_RPC_URL,
+		"accounts": [{"privateKey": private_key}],
+	}))
+	if not response.get("ok", false):
+		return response
+	var accounts_response = _validator.get_accounts()
+	if not accounts_response.get("ok", false):
+		return accounts_response
+	var accounts = accounts_response.get("value", [])
+	if not (accounts is Array) or accounts.is_empty():
+		return _failed("invalid_value")
+	return _success(String(accounts[0]))
 
 func _account_index(address: String) -> int:
 	for i in range(_accounts.size()):

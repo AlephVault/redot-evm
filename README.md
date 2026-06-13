@@ -1,6 +1,29 @@
 # redot-evm
 An implementation of EVM access in Redot, using a native implementation for non-web games, and using Metamask on web games.
 
+## Client initialization
+
+Create `AlephVault__EVM.Web3Client` and call `await client.initialize()` before
+using chain, account, balance, transfer, request, or contract methods.
+`initialize()` does not take a callback and returns `{"ok": true, "value":
+null}` on success. Use `get_accounts()` when you need the account list.
+
+On native builds, initialization currently uses a temporary built-in
+configuration:
+
+- Chain id: `1` (Ethereum mainnet)
+- RPC URL: `https://ethereum-json-rpc.stakely.io`
+- Accounts: `[]`
+
+This means native read-only RPC and contract calls can be made after
+initialization, while signing or transfers require a future account/private-key
+source to provide accounts. On web builds, initialization requests account
+access from the injected EIP-1193 wallet.
+
+Use `client.manages_wallet()` to check whether the active binding manages local
+wallet/account material. Native bindings return `true`; web bindings return
+`false` because account material stays inside the browser wallet.
+
 ## HTML5 exports
 
 For web exports, add `addons/AlephVault.EVM/templates/html5/web3-head-include.html`

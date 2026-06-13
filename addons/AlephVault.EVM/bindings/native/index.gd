@@ -15,56 +15,52 @@ var _config := {}
 var _accounts: Array = []
 var _chain_id: int = 0
 
+const DEFAULT_CHAIN_ID := 1
+const DEFAULT_RPC_URL := "https://ethereum-json-rpc.stakely.io"
+
 func _init():
 	if ClassDB.class_exists("AlephVaultEvmNativeWallet"):
 		_wallet = ClassDB.instantiate("AlephVaultEvmNativeWallet")
 
-## Initializes the native wallet from callback-provided config.
+## Initializes the native wallet with the temporary built-in chain/account
+## source. The native wallet is fixed to Ethereum mainnet, uses the Stakely
+## public RPC endpoint, and starts with no accounts until the future account
+## discovery/import flow supplies them. Success returns {"ok": true, "value":
+## null}; accounts are cached internally and exposed through get_accounts().
 ##
-## The callback is called as callback.call(self), so it can use this binding's
-## public helper methods before initialization completes. In particular,
-## validate_private_key() is available while the binding is not ready, and only
-## fails if the native extension is unavailable. The callback may return either
-## the config dictionary directly or a standard {"ok": true, "value":
-## Dictionary} response. Required config:
-## - "chain_id" or "chainId": the fixed chain id for this wallet.
-## - "rpc_url" or "rpcUrl": the RPC endpoint for that fixed chain.
-## - "accounts" is an Array of dictionaries shaped as
-##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null, or
-##   absent; it is metadata only. Accounts without valid privateKey values are
-##   ignored because every native account must support local signing.
 ## Transaction config dictionaries use the same names in both bindings:
 ## "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
 ## "maxPriorityFeePerGas", "nonce", "chainId", "chain_id", and "data".
 ## Numeric fields accept decimal strings, 0x-prefixed hex quantities, or JSON
 ## integers; use strings for large values. Contract view calls may also pass
 ## "block" or "blockTag".
-func initialize(callback: Callable):
+func initialize():
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	if not callback.is_valid():
-		return Async.failed("invalid_config")
 
-	var config_response = await callback.call(self)
-	if config_response is Dictionary and config_response.has("ok"):
-		if not config_response.get("ok", false):
-			return config_response
-		_config = config_response.get("value", {})
-	elif config_response is Dictionary:
-		_config = config_response
-	else:
-		return Async.failed("invalid_config")
+	_config = {
+		"chain_id": DEFAULT_CHAIN_ID,
+		"rpc_url": DEFAULT_RPC_URL,
+		"accounts": [],
+	}
 
 	var response = _wallet.initialize(JSON.stringify(_config))
 	if not response.get("ok", false):
 		return response
 
 	_ready = true
-	_accounts = response.get("value", [])
+	_accounts = []
+	var accounts_response = _wallet.get_accounts()
+	if accounts_response.get("ok", false):
+		_accounts = accounts_response.get("value", [])
 	var chain_response = _wallet.get_chain_id()
 	if chain_response.get("ok", false):
 		_chain_id = int(chain_response.get("value", 0))
-	return Async.success(_accounts)
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return Async.failed("incomplete_binding")
+	await tree.process_frame
+	return Async.success(null)
 
 func get_chain_id():
 	if _wallet == null:
@@ -242,17 +238,9 @@ func validate_address(value: String, checksum: bool = false):
 		return Async.failed("incomplete_binding")
 	return _wallet.validate_address(value, checksum)
 
-## Returns true because native wallets own local private-key material.
-func can_manage_private_keys() -> bool:
+## Returns true because native bindings manage local wallet/account material.
+func manages_wallet() -> bool:
 	return true
-
-## Validates a private key and returns its derived checksum address. This works
-## before initialize() marks the binding ready; it only fails if the native
-## extension is unavailable or the key is invalid.
-func validate_private_key(private_key: String):
-	if _wallet == null:
-		return Async.failed("incomplete_binding")
-	return _wallet.validate_private_key(private_key)
 
 func to_hex(value: PackedByteArray):
 	var hex := "0x"

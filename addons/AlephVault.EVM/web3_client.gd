@@ -89,19 +89,15 @@ func _init():
 #
 # --------- Essential, non-contract, methods ---------
 #
-# 1. (asynchronous) initialize(Callable) returning:
-#    - {"ok": true, "value": Array[String]}
-#      Where value is the array of addresses that belong to valid
-#      accounts, configured in the current game (native) or allowed
-#      when connecting to the page's domain (web).
+# 1. (asynchronous) initialize() returning:
+#    - {"ok": true, "value": null}
+#      Where success means the binding finished its asynchronous initialization
+#      and subsequent ready-gated calls may be attempted.
 #    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "user_rejected".
-#      Other possible options are "no_valid_chains" if no native chain
-#      is configured, or "no_valid_accounts" if no accounts are
-#      configured (neither by import nor by seed). Another possible
-#      code is "incomplete_binding" if, somehow, the binding could
-#      not be created (e.g. the native implementation is somehow
-#      not available).
+#      Another possible code is "incomplete_binding" if, somehow, the
+#      binding could not be created (e.g. the native implementation is
+#      somehow not available).
 #
 # 2. (asynchronous) get_chain_id() returning:
 #    - {"ok": true, "value": int}
@@ -347,19 +343,12 @@ func _init():
 #       returned if checksum validation is requested but the binding is
 #       not complete enough to compute/verify the checksum.
 #
-# 28a. can_manage_private_keys() returning bool:
-#      Returns true when the binding can validate/import local private keys.
-#
-# 28b. validate_private_key(private_key: String) returning:
-#     - {"ok": true, "value": String}
-#       Where value is the EIP-55 checksum address derived from the key.
-#     - {"ok": false, "error": String}
-#       Where error can be "invalid_value", "not_supported", or
-#       "incomplete_binding".
+# 29. manages_wallet() returning bool:
+#     Returns true when the binding manages local wallet/account material.
 #
 # --------- Contract-related methods ---------
 #
-# 29. contract_create(address: String, abi_key: String) returning:
+# 30. contract_create(address: String, abi_key: String) returning:
 #     - {"ok": true, "value": null}
 #       Where the binding creates and stores a contract reference for the
 #       address and ABI, such as window.web3.Contract(...) in web builds.
@@ -369,7 +358,7 @@ func _init():
 #       address, or "not_found" if abi_key does not match a registered ABI.
 #     This method is synchronous and only performs setup.
 #
-# 30. (asynchronous) contract_invoke(
+# 31. (asynchronous) contract_invoke(
 #       address: String, method: String | Dictionary, params: Array,
 #       tx_params: Dictionary
 #     ) returning:
@@ -386,7 +375,7 @@ func _init():
 #     configuration dictionary syntax as transfer()'s tx_config. Contract
 #     view/pure calls may also pass "block" or "blockTag".
 #
-# 31. (asynchronous) contract_get_events(
+# 32. (asynchronous) contract_get_events(
 #       address: String, event: String | Dictionary, topics: Array | Dictionary,
 #       from: String = "0x0", to: String = "latest"
 #     ) returning:
@@ -401,7 +390,7 @@ func _init():
 #     binding resolves overloads. Topics can be an array of up to three
 #     topic values, or a dictionary keyed by valid indexed field names.
 #
-# 32. contract_get_tx_events(
+# 33. contract_get_tx_events(
 #       tx_obj: Dictionary, event: String | Dictionary | null = null
 #     ) returning:
 #     - {"ok": true, "value": Array}
@@ -427,38 +416,19 @@ func _init():
 # These are essential methods related to managing sessions in the
 # wallet: accounts, current chain, and balance.
 
-## Initializes the binding. Each binding has a different way to do
-## the initialization. This method is the FIRST THING TO CALL and
-## tells the accounts that are allowed and ready in the binding.
+## Initializes the binding. Each binding has a different way to do the
+## initialization. This method is the FIRST THING TO CALL. It is asynchronous
+## and should be awaited, but a successful response does not carry a value.
 ##
 ## - Web bindings will do it directly against the EIP-1193 wallet.
 ##   When the wallet is ready (the web3 instance), then this call
-##   will resolve successfully.
-## - Native bindings will make use of a given callback param. The
-##   callback will typically resolve the involved accounts and
-##   whatever data is needed (e.g. their private keys, to be used
-##   inside the binding).
-##
-## Native callback contract:
-## - The callback is invoked with the current binding as its only argument:
-##   callback.call(binding). The binding has the same public helper methods as
-##   the regular client surface. Private-key helpers, especially
-##   validate_private_key(private_key), are intentionally available before the
-##   binding is ready so the callback can validate/import keys while building
-##   the config. They fail only if the binding is incomplete, or if the key
-##   itself is invalid.
-## - The callback may return the config dictionary directly, or a standard
-##   {"ok": true, "value": Dictionary} / {"ok": false, "error": Variant}
-##   response.
-## - The config must include one fixed native chain: "chain_id" or "chainId"
-##   as an integer, decimal string, or 0x-prefixed hex quantity, plus
-##   "rpc_url" or "rpcUrl".
-## - Accounts are read from "accounts", an array of dictionaries shaped as
-##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null,
-##   or absent; it is currently metadata only. Every exposed native account is
-##   derived from a valid privateKey and can sign locally.
-func initialize(callback: Callable):
-	return _binding.initialize(callback)
+##   will resolve successfully with {"ok": true, "value": null}.
+## - Native bindings initialize from their internal state a certain
+##   account and a certain chain (chain/account switching will not
+##   be supported this way, unless per-game logic or reinstalling
+##   a different account).
+func initialize():
+	return _binding.initialize()
 
 ## Returns the chain id for this binding. Web bindings can observe wallet-side
 ## chain changes. Native bindings are initialized with one fixed chain.
@@ -692,15 +662,9 @@ func validate_bytes(value: Variant, size: int = 0):
 func validate_address(value: String, checksum: bool = false):
 	return _binding.validate_address(value, checksum)
 
-## Returns whether this binding can validate and manage local private keys.
-func can_manage_private_keys() -> bool:
-	return _binding.can_manage_private_keys()
-
-## Validates a native private key and returns its derived checksum address.
-##
-## Web bindings return {"ok": false, "error": "not_supported"}.
-func validate_private_key(private_key: String):
-	return _binding.validate_private_key(private_key)
+## Returns whether this binding manages local wallet/account material.
+func manages_wallet() -> bool:
+	return _binding.manages_wallet()
 
 # --------- Contract-related methods ---------
 

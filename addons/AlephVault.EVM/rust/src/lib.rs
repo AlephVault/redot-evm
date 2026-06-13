@@ -83,9 +83,9 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
 #[godot_api]
 impl AlephVaultEvmNativeWallet {
     #[func]
-    // Rationale: native builds cannot ask a browser wallet for state, so the
-    // game supplies one fixed RPC chain and local signing keys through the
-    // initialization callback; this method validates and caches that state.
+    // Rationale: native builds currently receive one fixed RPC chain and an
+    // account list from the GDScript binding. The list may be empty until the
+    // future account-discovery flow supplies local signing keys.
     fn initialize(&mut self, config_json: GString) -> Dictionary {
         let Ok(config) = serde_json::from_str::<Value>(&config_json.to_string()) else {
             return failed("invalid_config");
@@ -112,16 +112,13 @@ impl AlephVaultEvmNativeWallet {
         };
 
         let (accounts, wallets) = collect_accounts(&config);
-        if accounts.is_empty() {
-            return failed("no_valid_accounts");
-        }
 
         self.ready = true;
         self.chain_id = chain_id;
         self.rpc_url = rpc_url.to_owned();
         self.accounts = accounts;
         self.wallets = wallets;
-        success(json!(self.accounts))
+        success(Value::Null)
     }
 
     #[func]
@@ -349,17 +346,6 @@ impl AlephVaultEvmNativeWallet {
             return failed("invalid_value");
         }
         success(Value::Null)
-    }
-
-    #[func]
-    // Rationale: native account management starts from private keys, so this
-    // validates key syntax and returns the derived checksum address for preview
-    // or import flows without mutating wallet state.
-    fn validate_private_key(&self, private_key: GString) -> Dictionary {
-        match PrivateKeySigner::from_str(&private_key.to_string()) {
-            Ok(wallet) => success(json!(format_address(wallet.address()))),
-            Err(_) => failed("invalid_value"),
-        }
     }
 
     #[func]
@@ -868,7 +854,7 @@ impl AlephVaultEvmNativeWallet {
     }
 }
 
-// Rationale: initialization expects account objects with privateKey and
+// Rationale: initialization accepts account objects with privateKey/private_key and
 // optional name metadata; only valid keys become exposed/signing accounts.
 fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, PrivateKeySigner>) {
     let mut wallets = HashMap::new();
@@ -878,7 +864,11 @@ fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, PrivateKey
         for account in config_accounts {
             if let Some(key) = account
                 .as_object()
-                .and_then(|account| account.get("privateKey"))
+                .and_then(|account| {
+                    account
+                        .get("privateKey")
+                        .or_else(|| account.get("private_key"))
+                })
                 .and_then(Value::as_str)
             {
                 if let Ok(wallet) = PrivateKeySigner::from_str(key) {
@@ -1111,7 +1101,10 @@ fn abi_spec_item_to_type(spec: &Value) -> Option<DynSolType> {
     if let Some(type_name) = spec.as_str() {
         return parse_param_type(type_name);
     }
-    serde_json::from_value::<Param>(spec.clone()).ok()?.resolve().ok()
+    serde_json::from_value::<Param>(spec.clone())
+        .ok()?
+        .resolve()
+        .ok()
 }
 
 // Rationale: Alloy's ABI reader is the source of truth for Solidity type

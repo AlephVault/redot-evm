@@ -43,10 +43,9 @@ func _init():
 
 ## Requests account access from the EIP-1193 provider and marks the binding ready.
 ##
-## Returns {"ok": true, "value": Array[String]} on success, or a standard
-## failure dictionary. The callback argument is accepted for binding-interface
-## compatibility, but the web binding does not use it.
-func initialize(_callback: Callable):
+## Returns {"ok": true, "value": null} on success, or a standard failure
+## dictionary. Accounts are cached internally and exposed through get_accounts().
+func initialize():
 	var response = await _request("eth_requestAccounts", [])
 	if not response.get("ok", false):
 		var error = response.get("error")
@@ -63,7 +62,7 @@ func initialize(_callback: Callable):
 	var chain_response = await get_chain_id()
 	if chain_response.get("ok", false):
 		_chain_id = int(chain_response["value"])
-	return Async.success(_accounts)
+	return Async.success(null)
 
 ## Gets the currently selected chain id from the provider.
 ##
@@ -262,14 +261,10 @@ func validate_bytes(value: Variant, size: int = 0):
 func validate_address(value: String, checksum: bool = false):
 	return _eval_response("window.alephVaultEvmWeb3.validateAddress(%s, %s)" % [_json(value), _json(checksum)])
 
-## Returns false because browser wallets do not expose private keys.
-func can_manage_private_keys() -> bool:
+## Returns false because browser wallets keep wallet/account material outside
+## this binding.
+func manages_wallet() -> bool:
 	return false
-
-## Web builds cannot inspect or validate private keys. This does not depend on
-## readiness, so initialization code can probe capability consistently.
-func validate_private_key(_private_key: String):
-	return Async.failed("not_supported")
 
 ## Encodes bytes as a 0x-prefixed lowercase hex string.
 func to_hex(value: PackedByteArray):
