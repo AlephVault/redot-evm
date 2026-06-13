@@ -266,6 +266,30 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return false
 
+func account_create(_password: String):
+	return Async.failed("not_supported")
+
+func account_destroy():
+	return Async.failed("not_supported")
+
+func account_backup(_target_path: String):
+	return Async.failed("not_supported")
+
+func account_restore(_source_path: String):
+	return Async.failed("not_supported")
+
+func account_unlock(_password: String):
+	return Async.failed("not_supported")
+
+func account_lock():
+	return Async.failed("not_supported")
+
+func account_set_password(_password: String):
+	return Async.failed("not_supported")
+
+func set_chain(_rpc_url: String):
+	return Async.failed("not_supported")
+
 ## Encodes bytes as a 0x-prefixed lowercase hex string.
 func to_hex(value: PackedByteArray):
 	return Async.success(_to_hex_value(value))

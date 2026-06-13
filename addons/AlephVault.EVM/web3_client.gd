@@ -346,9 +346,18 @@ func _init():
 # 29. manages_wallet() returning bool:
 #     Returns true when the binding manages local wallet/account material.
 #
+# 30. Native wallet lifecycle methods:
+#     account_create(password), account_destroy(), account_backup(target_path),
+#     account_restore(source_path), account_unlock(password), account_lock(),
+#     account_set_password(password), and set_chain(rpc_url).
+#     Web bindings return {"ok": false, "error": "not_supported"} for all of
+#     these methods. Native bindings support a single encrypted account whose
+#     private key never crosses into GDScript; only its address is returned by
+#     get_accounts() after unlock and initialize().
+#
 # --------- Contract-related methods ---------
 #
-# 30. contract_create(address: String, abi_key: String) returning:
+# 31. contract_create(address: String, abi_key: String) returning:
 #     - {"ok": true, "value": null}
 #       Where the binding creates and stores a contract reference for the
 #       address and ABI, such as window.web3.Contract(...) in web builds.
@@ -358,7 +367,7 @@ func _init():
 #       address, or "not_found" if abi_key does not match a registered ABI.
 #     This method is synchronous and only performs setup.
 #
-# 31. (asynchronous) contract_invoke(
+# 32. (asynchronous) contract_invoke(
 #       address: String, method: String | Dictionary, params: Array,
 #       tx_params: Dictionary
 #     ) returning:
@@ -375,7 +384,7 @@ func _init():
 #     configuration dictionary syntax as transfer()'s tx_config. Contract
 #     view/pure calls may also pass "block" or "blockTag".
 #
-# 32. (asynchronous) contract_get_events(
+# 33. (asynchronous) contract_get_events(
 #       address: String, event: String | Dictionary, topics: Array | Dictionary,
 #       from: String = "0x0", to: String = "latest"
 #     ) returning:
@@ -390,7 +399,7 @@ func _init():
 #     binding resolves overloads. Topics can be an array of up to three
 #     topic values, or a dictionary keyed by valid indexed field names.
 #
-# 33. contract_get_tx_events(
+# 34. contract_get_tx_events(
 #       tx_obj: Dictionary, event: String | Dictionary | null = null
 #     ) returning:
 #     - {"ok": true, "value": Array}
@@ -423,11 +432,10 @@ func _init():
 ## - Web bindings will do it directly against the EIP-1193 wallet.
 ##   When the wallet is ready (the web3 instance), then this call
 ##   will resolve successfully with {"ok": true, "value": null}.
-## - Native bindings receive their temporary chain/account source from the Rust
-##   native wallet: Ethereum mainnet (chain id 1),
-##   https://ethereum-json-rpc.stakely.io, and no accounts. A later
-##   account-discovery flow may populate accounts. Success still resolves as
-##   {"ok": true, "value": null}.
+## - Native bindings require the Rust wallet to be unlocked and to have one
+##   account plus a configured chain. Success still resolves as
+##   {"ok": true, "value": null}; use get_accounts() and get_chain_id() for
+##   the initialized address and chain.
 func initialize():
 	return _binding.initialize()
 
@@ -666,6 +674,46 @@ func validate_address(value: String, checksum: bool = false):
 ## Returns whether this binding manages local wallet/account material.
 func manages_wallet() -> bool:
 	return _binding.manages_wallet()
+
+## Creates the native single-account wallet with password-protected storage.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_create(password: String):
+	return _binding.account_create(password)
+
+## Destroys the native wallet while it is locked.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_destroy():
+	return _binding.account_destroy()
+
+## Writes an encrypted native wallet backup to target_path while locked.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_backup(target_path: String):
+	return _binding.account_backup(target_path)
+
+## Restores an encrypted native wallet backup from source_path when unset.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_restore(source_path: String):
+	return _binding.account_restore(source_path)
+
+## Unlocks the native wallet with its password. Call initialize() afterwards to
+## initialize the Godot binding cache. Web bindings return not_supported.
+func account_unlock(password: String):
+	return _binding.account_unlock(password)
+
+## Locks the native wallet and de-initializes the Godot binding cache.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_lock():
+	return _binding.account_lock()
+
+## Changes the native wallet password while unlocked.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_set_password(password: String):
+	return _binding.account_set_password(password)
+
+## Sets the native wallet HTTP RPC URL and infers chain id from eth_chainId.
+## This is independent from set_chain_id(). Web bindings return not_supported.
+func set_chain(rpc_url: String):
+	return _binding.set_chain(rpc_url)
 
 # --------- Contract-related methods ---------
 

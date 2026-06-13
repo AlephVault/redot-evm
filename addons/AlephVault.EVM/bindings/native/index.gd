@@ -19,11 +19,9 @@ func _init():
 	if ClassDB.class_exists("AlephVaultEvmNativeWallet"):
 		_wallet = ClassDB.instantiate("AlephVaultEvmNativeWallet")
 
-## Initializes the native wallet and reads the temporary chain/account source
-## returned by the native extension. The Rust wallet currently reports Ethereum
-## mainnet, the Stakely public RPC endpoint, and no accounts. Success returns
-## {"ok": true, "value": null}; accounts are cached internally and exposed
-## through get_accounts().
+## Initializes the native wallet from Rust-owned unlocked account and chain
+## state. Success returns {"ok": true, "value": null}; address and chain data
+## are cached internally and exposed through get_accounts() and get_chain_id().
 ##
 ## Transaction config dictionaries use the same names in both bindings:
 ## "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
@@ -64,10 +62,10 @@ func get_chain_id():
 func can_set_chain_id() -> bool:
 	return false
 
-func set_chain_id(chain_id: int):
+func set_chain_id(_chain_id: int):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.set_chain_id(chain_id, JSON.stringify(_config))
+	return Async.failed("not_supported")
 
 func get_accounts():
 	if _wallet == null:
@@ -232,6 +230,64 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return true
 
+func account_create(password: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_create(password)
+
+func account_destroy():
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	var response = _wallet.account_destroy()
+	if response.get("ok", false):
+		_clear_ready_state()
+	return response
+
+func account_backup(target_path: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_backup(target_path)
+
+func account_restore(source_path: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_restore(source_path)
+
+func account_unlock(password: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_unlock(password)
+
+func account_lock():
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	var response = _wallet.account_lock()
+	if response.get("ok", false):
+		_clear_ready_state()
+	return response
+
+func account_set_password(password: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_set_password(password)
+
+func set_chain(rpc_url: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	var response = _wallet.set_chain(rpc_url)
+	if not response.get("ok", false):
+		return response
+	var value = response.get("value", {})
+	if value is Dictionary:
+		_config = value
+		_chain_id = int(_config.get("chain_id", 0))
+		_accounts = _config.get("accounts", _accounts)
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return Async.failed("incomplete_binding")
+	await tree.process_frame
+	return response
+
 func to_hex(value: PackedByteArray):
 	var hex := "0x"
 	for byte in value:
@@ -270,6 +326,12 @@ func contract_get_tx_events(tx_obj: Dictionary, event: Variant = null):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
 	return _wallet.contract_get_tx_events(JSON.stringify(tx_obj), JSON.stringify(event))
+
+func _clear_ready_state():
+	_ready = false
+	_config = {}
+	_accounts = []
+	_chain_id = 0
 
 func _strip_optional_0x(hex: String) -> String:
 	if hex.begins_with("0x"):

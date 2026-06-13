@@ -9,17 +9,20 @@ use alloy_primitives::{Address, Bytes, TxKind, B256, I256, U256};
 use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
 use godot::builtin::{Array, Dictionary, GString, PackedByteArray, Variant};
-use godot::classes::{IRefCounted, RefCounted};
+use godot::classes::{IRefCounted, ProjectSettings, RefCounted};
 use godot::prelude::*;
 use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
+use rand::thread_rng;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::str::FromStr;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
 
-const DEFAULT_CHAIN_ID: i64 = 1;
-const DEFAULT_RPC_URL: &str = "https://ethereum-json-rpc.stakely.io";
+const KEYSTORE_FILE: &str = "account.json";
+const STORAGE_DIR: &str = "user://AlephVault.EVM/native_wallet";
+const METADATA_PATH: &str = "user://AlephVault.EVM/native_wallet/wallet.json";
 
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
@@ -86,20 +89,28 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
 #[godot_api]
 impl AlephVaultEvmNativeWallet {
     #[func]
-    // Rationale: native initialization owns the temporary chain/account source
-    // and reports it upward to GDScript. Godot consumes this dictionary for its
-    // cache, while the public facade still resolves initialize() with null.
+    // Rationale: initialization exposes only chain metadata and addresses to
+    // GDScript. The signer must already be unlocked and remain inside Rust.
     fn initialize(&mut self) -> Dictionary {
+        let metadata_path = metadata_path();
+        let Ok(metadata) = load_metadata(&metadata_path) else {
+            return failed("no_valid_accounts");
+        };
+        if !metadata.has_account() {
+            return failed("no_valid_accounts");
+        }
+        if !metadata.has_chain() {
+            return failed("no_valid_chains");
+        }
+        if self.wallets.is_empty() {
+            return failed("not_unlocked");
+        }
+
         self.ready = true;
-        self.chain_id = DEFAULT_CHAIN_ID;
-        self.rpc_url = DEFAULT_RPC_URL.to_owned();
-        self.accounts.clear();
-        self.wallets.clear();
-        success(json!({
-            "chain_id": self.chain_id,
-            "rpc_url": self.rpc_url,
-            "accounts": self.accounts,
-        }))
+        self.chain_id = metadata.chain_id;
+        self.rpc_url = metadata.rpc_url;
+        self.accounts = vec![metadata.address];
+        success(self.config_json())
     }
 
     #[func]
@@ -330,14 +341,235 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
-    // Rationale: encrypted storage needs native secp256k1 address derivation
-    // for imported keys, but the public client facade does not expose private
-    // key validation/import helpers.
-    fn private_key_to_address(&self, private_key: GString) -> Dictionary {
-        match PrivateKeySigner::from_str(&private_key.to_string()) {
-            Ok(wallet) => success(json!(format_address(wallet.address()))),
-            Err(_) => failed("invalid_value"),
+    fn account_create(&mut self, password: GString) -> Dictionary {
+        let password = password.to_string();
+        if password.is_empty() {
+            return failed("empty_password");
         }
+        let storage_dir = storage_dir();
+        let metadata_path = metadata_path();
+        if metadata_has_account(&metadata_path) {
+            return failed("invalid_state");
+        }
+        if fs::create_dir_all(&storage_dir).is_err() {
+            return failed("os_error");
+        }
+        let keystore_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
+        if keystore_path.exists() && fs::remove_file(&keystore_path).is_err() {
+            return failed("os_error");
+        }
+
+        let mut rng = thread_rng();
+        let Ok((wallet, _uuid)) = PrivateKeySigner::new_keystore(
+            &storage_dir,
+            &mut rng,
+            password.as_bytes(),
+            Some(KEYSTORE_FILE),
+        ) else {
+            return failed("crypto_error");
+        };
+
+        let mut metadata = load_metadata(&metadata_path).unwrap_or_default();
+        metadata.keystore_path = keystore_path.to_string_lossy().to_string();
+        metadata.address = format_address(wallet.address());
+        if save_metadata(&metadata_path, &metadata).is_err() {
+            return failed("os_error");
+        }
+        self.clear_unlocked_state();
+        success(json!(metadata.address))
+    }
+
+    #[func]
+    fn account_destroy(&mut self) -> Dictionary {
+        if !self.wallets.is_empty() {
+            return failed("invalid_state");
+        }
+        let metadata_path = metadata_path();
+        let Ok(metadata) = load_metadata(&metadata_path) else {
+            return failed("invalid_state");
+        };
+        if !metadata.has_account() {
+            return failed("invalid_state");
+        }
+        if !metadata.keystore_path.is_empty() {
+            let _ = fs::remove_file(&metadata.keystore_path);
+        }
+        let _ = fs::remove_file(&metadata_path);
+        self.clear_ready_state();
+        success(Value::Null)
+    }
+
+    #[func]
+    fn account_backup(&self, target_path: GString) -> Dictionary {
+        if !self.wallets.is_empty() {
+            return failed("invalid_state");
+        }
+        let Ok(metadata) = load_metadata(&metadata_path()) else {
+            return failed("invalid_state");
+        };
+        if !metadata.has_account() {
+            return failed("invalid_state");
+        }
+        let Ok(keystore) = fs::read_to_string(&metadata.keystore_path) else {
+            return failed("invalid_storage");
+        };
+        let backup = json!({
+            "version": 1,
+            "metadata": metadata.to_json(),
+            "keystore": keystore,
+        });
+        if write_json_file(&globalize_path(&target_path.to_string()), &backup).is_err() {
+            return failed("os_error");
+        }
+        success(Value::Null)
+    }
+
+    #[func]
+    fn account_restore(&mut self, source_path: GString) -> Dictionary {
+        let storage_dir = storage_dir();
+        let metadata_path = metadata_path();
+        if metadata_has_account(&metadata_path) {
+            return failed("invalid_state");
+        }
+        let Ok(backup) = read_json_file(&globalize_path(&source_path.to_string())) else {
+            return failed("invalid_backup");
+        };
+        let Some(keystore) = backup.get("keystore").and_then(Value::as_str) else {
+            return failed("invalid_backup");
+        };
+        let Some(mut metadata) = backup.get("metadata").and_then(WalletMetadata::from_json) else {
+            return failed("invalid_backup");
+        };
+        if !metadata.has_account() {
+            return failed("invalid_backup");
+        }
+        if fs::create_dir_all(&storage_dir).is_err() {
+            return failed("os_error");
+        }
+        let keystore_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
+        metadata.keystore_path = keystore_path.to_string_lossy().to_string();
+        if fs::write(&metadata.keystore_path, keystore).is_err() {
+            return failed("os_error");
+        }
+        if save_metadata(&metadata_path, &metadata).is_err() {
+            return failed("os_error");
+        }
+        self.clear_unlocked_state();
+        success(json!(metadata.address))
+    }
+
+    #[func]
+    fn account_unlock(&mut self, password: GString) -> Dictionary {
+        if !self.wallets.is_empty() {
+            return failed("invalid_state");
+        }
+        let Ok(metadata) = load_metadata(&metadata_path()) else {
+            return failed("invalid_state");
+        };
+        if !metadata.has_account() {
+            return failed("invalid_state");
+        }
+        let Ok(wallet) = PrivateKeySigner::decrypt_keystore(
+            &metadata.keystore_path,
+            password.to_string().as_bytes(),
+        ) else {
+            return failed("invalid_password");
+        };
+        let address = format_address(wallet.address());
+        self.wallets.clear();
+        self.wallets.insert(wallet.address(), wallet);
+        self.accounts = vec![address.clone()];
+        self.ready = false;
+        success(json!(address))
+    }
+
+    #[func]
+    fn account_lock(&mut self) -> Dictionary {
+        if self.wallets.is_empty() {
+            return failed("invalid_state");
+        }
+        self.clear_ready_state();
+        success(Value::Null)
+    }
+
+    #[func]
+    fn account_set_password(&mut self, password: GString) -> Dictionary {
+        if self.wallets.is_empty() {
+            return failed("invalid_state");
+        }
+        let password = password.to_string();
+        if password.is_empty() {
+            return failed("empty_password");
+        }
+        let storage_dir = storage_dir();
+        let metadata_path = metadata_path();
+        let Ok(mut metadata) = load_metadata(&metadata_path) else {
+            return failed("invalid_state");
+        };
+        let Some(wallet) = self.wallets.values().next().cloned() else {
+            return failed("invalid_state");
+        };
+        if fs::create_dir_all(&storage_dir).is_err() {
+            return failed("os_error");
+        }
+        let mut rng = thread_rng();
+        let new_name = "account-new.json";
+        let new_path = Path::new(&storage_dir).join(new_name);
+        let final_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
+        if new_path.exists() {
+            let _ = fs::remove_file(&new_path);
+        }
+        let Ok((_wallet, _uuid)) = PrivateKeySigner::encrypt_keystore(
+            &storage_dir,
+            &mut rng,
+            wallet.to_bytes().as_slice(),
+            password.as_bytes(),
+            Some(new_name),
+        ) else {
+            return failed("crypto_error");
+        };
+        let old_path = metadata.keystore_path.clone();
+        if final_path.exists() && fs::remove_file(&final_path).is_err() {
+            return failed("os_error");
+        }
+        if fs::rename(&new_path, &final_path).is_err() {
+            return failed("os_error");
+        }
+        metadata.keystore_path = final_path.to_string_lossy().to_string();
+        if save_metadata(&metadata_path, &metadata).is_err() {
+            return failed("os_error");
+        }
+        if !old_path.is_empty() && old_path != metadata.keystore_path {
+            let _ = fs::remove_file(old_path);
+        }
+        success(Value::Null)
+    }
+
+    #[func]
+    fn set_chain(&mut self, rpc_url: GString) -> Dictionary {
+        let rpc_url = rpc_url.to_string();
+        if !(rpc_url.starts_with("http://") || rpc_url.starts_with("https://")) {
+            return failed("invalid_rpc_url");
+        }
+        let Ok(chain_value) = rpc_request(&rpc_url, "eth_chainId", json!([])) else {
+            return failed("invalid_chain");
+        };
+        let Some(chain_id) = chain_id_value_to_i64(&chain_value) else {
+            return failed("invalid_chain");
+        };
+        if chain_id <= 0 {
+            return failed("invalid_chain");
+        }
+        let metadata_path = metadata_path();
+        let mut metadata = load_metadata(&metadata_path).unwrap_or_default();
+        metadata.rpc_url = rpc_url;
+        metadata.chain_id = chain_id;
+        if save_metadata(&metadata_path, &metadata).is_err() {
+            return failed("os_error");
+        }
+        self.rpc_url = metadata.rpc_url.clone();
+        self.chain_id = metadata.chain_id;
+        success(self.config_json())
     }
 
     #[func]
@@ -844,6 +1076,125 @@ impl AlephVaultEvmNativeWallet {
         let abi_json = self.abis.get(key)?;
         serde_json::from_str::<JsonAbi>(abi_json).ok()
     }
+
+    fn clear_unlocked_state(&mut self) {
+        self.ready = false;
+        self.accounts.clear();
+        self.wallets.clear();
+    }
+
+    fn clear_ready_state(&mut self) {
+        self.ready = false;
+        self.chain_id = 0;
+        self.rpc_url.clear();
+        self.accounts.clear();
+        self.wallets.clear();
+    }
+
+    fn config_json(&self) -> Value {
+        json!({
+            "chain_id": self.chain_id,
+            "rpc_url": self.rpc_url,
+            "accounts": self.accounts,
+        })
+    }
+}
+
+#[derive(Default)]
+struct WalletMetadata {
+    rpc_url: String,
+    chain_id: i64,
+    keystore_path: String,
+    address: String,
+}
+
+impl WalletMetadata {
+    fn has_account(&self) -> bool {
+        !self.keystore_path.is_empty() && !self.address.is_empty()
+    }
+
+    fn has_chain(&self) -> bool {
+        self.chain_id > 0 && !self.rpc_url.is_empty()
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "rpc_url": self.rpc_url,
+            "chain_id": self.chain_id,
+            "keystore_path": self.keystore_path,
+            "address": self.address,
+        })
+    }
+
+    fn from_json(value: &Value) -> Option<Self> {
+        Some(Self {
+            rpc_url: value
+                .get("rpc_url")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            chain_id: value
+                .get("chain_id")
+                .and_then(chain_id_value_to_i64)
+                .unwrap_or_default(),
+            keystore_path: value
+                .get("keystore_path")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            address: value
+                .get("address")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        })
+    }
+}
+
+fn metadata_has_account(path: &str) -> bool {
+    load_metadata(path)
+        .map(|metadata| metadata.has_account())
+        .unwrap_or(false)
+}
+
+fn storage_dir() -> String {
+    globalize_path(STORAGE_DIR)
+}
+
+fn metadata_path() -> String {
+    globalize_path(METADATA_PATH)
+}
+
+fn globalize_path(path: &str) -> String {
+    let path = GString::from(path);
+    ProjectSettings::singleton()
+        .globalize_path(&path)
+        .to_string()
+}
+
+fn load_metadata(path: &str) -> Result<WalletMetadata, ()> {
+    if !Path::new(path).exists() {
+        return Err(());
+    }
+    let value = read_json_file(path)?;
+    WalletMetadata::from_json(&value).ok_or(())
+}
+
+fn save_metadata(path: &str, metadata: &WalletMetadata) -> Result<(), ()> {
+    write_json_file(path, &metadata.to_json())
+}
+
+fn read_json_file(path: &str) -> Result<Value, ()> {
+    let contents = fs::read_to_string(path).map_err(|_| ())?;
+    serde_json::from_str(&contents).map_err(|_| ())
+}
+
+fn write_json_file(path: &str, value: &Value) -> Result<(), ()> {
+    if let Some(parent) = PathBuf::from(path).parent() {
+        fs::create_dir_all(parent).map_err(|_| ())?;
+    }
+    let contents = serde_json::to_string(value).map_err(|_| ())?;
+    fs::write(path, contents).map_err(|_| ())
 }
 
 // Rationale: non-wallet JSON-RPC calls are intentionally thin pass-throughs so
