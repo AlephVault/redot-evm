@@ -425,7 +425,7 @@ func _init():
 ## - Web bindings will do it directly against the EIP-1193 wallet.
 ##   When the wallet is ready (the web3 instance), then this call
 ##   will resolve successfully.
-## - Native bindings will make use of a given node in `obj`. The
+## - Native bindings will make use of a given callback param. The
 ##   callback will typically resolve the involved accounts and
 ##   whatever data is needed (e.g. their private keys, to be used
 ##   inside the binding).
