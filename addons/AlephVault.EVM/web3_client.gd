@@ -685,12 +685,12 @@ func account_create(password: String):
 func account_destroy():
 	return _binding.account_destroy()
 
-## Writes an encrypted native wallet backup to target_path while locked.
+## Copies the encrypted native keystore to target_path while locked.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
 func account_backup(target_path: String):
 	return _binding.account_backup(target_path)
 
-## Restores an encrypted native wallet backup from source_path when unset.
+## Restores an encrypted native keystore from source_path when unset.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
 func account_restore(source_path: String):
 	return _binding.account_restore(source_path)
@@ -711,7 +711,8 @@ func account_set_password(password: String):
 	return _binding.account_set_password(password)
 
 ## Sets the native wallet HTTP RPC URL and infers chain id from eth_chainId.
-## This is independent from set_chain_id(). Web bindings return not_supported.
+## The chain is transient and is not stored on disk. This is independent from
+## set_chain_id(). Web bindings return not_supported.
 func set_chain(rpc_url: String):
 	return _binding.set_chain(rpc_url)
 

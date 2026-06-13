@@ -29,12 +29,14 @@ Native wallet lifecycle:
 - `account_lock()` and `account_set_password(password)` require an unlocked
   native account. Locking also de-initializes the Godot binding cache.
 - `set_chain(rpc_url)` can be called in any native wallet state. It accepts an
-  HTTP(S) RPC URL and infers the chain id from `eth_chainId`.
+  HTTP(S) RPC URL, infers the chain id from `eth_chainId`, and keeps that chain
+  configuration only in process memory.
 
 Native wallets expose only one account address. Private keys are generated,
 encrypted, decrypted, and used for signing inside the Rust binding; GDScript
-wrappers never receive them. Web bindings return `not_supported` for every
-native wallet lifecycle method.
+wrappers never receive them. Backups copy the encrypted keystore itself, so the
+same password is required after restore. Web bindings return `not_supported`
+for every native wallet lifecycle method.
 
 ## HTML5 exports
 

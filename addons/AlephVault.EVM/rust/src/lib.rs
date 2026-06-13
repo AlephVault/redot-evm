@@ -22,7 +22,6 @@ use tiny_keccak::{Hasher, Keccak};
 
 const KEYSTORE_FILE: &str = "account.json";
 const STORAGE_DIR: &str = "user://AlephVault.EVM/native_wallet";
-const METADATA_PATH: &str = "user://AlephVault.EVM/native_wallet/wallet.json";
 
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
@@ -89,17 +88,13 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
 #[godot_api]
 impl AlephVaultEvmNativeWallet {
     #[func]
-    // Rationale: initialization exposes only chain metadata and addresses to
+    // Rationale: initialization exposes only chain state and addresses to
     // GDScript. The signer must already be unlocked and remain inside Rust.
     fn initialize(&mut self) -> Dictionary {
-        let metadata_path = metadata_path();
-        let Ok(metadata) = load_metadata(&metadata_path) else {
-            return failed("no_valid_accounts");
-        };
-        if !metadata.has_account() {
+        if !keystore_exists() {
             return failed("no_valid_accounts");
         }
-        if !metadata.has_chain() {
+        if self.rpc_url.is_empty() || self.chain_id <= 0 {
             return failed("no_valid_chains");
         }
         if self.wallets.is_empty() {
@@ -107,9 +102,6 @@ impl AlephVaultEvmNativeWallet {
         }
 
         self.ready = true;
-        self.chain_id = metadata.chain_id;
-        self.rpc_url = metadata.rpc_url;
-        self.accounts = vec![metadata.address];
         success(self.config_json())
     }
 
@@ -342,13 +334,15 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_create(&mut self, password: GString) -> Dictionary {
+        if !self.wallets.is_empty() {
+            return failed("invalid_state");
+        }
         let password = password.to_string();
         if password.is_empty() {
             return failed("empty_password");
         }
         let storage_dir = storage_dir();
-        let metadata_path = metadata_path();
-        if metadata_has_account(&metadata_path) {
+        if keystore_exists() {
             return failed("invalid_state");
         }
         if fs::create_dir_all(&storage_dir).is_err() {
@@ -369,14 +363,8 @@ impl AlephVaultEvmNativeWallet {
             return failed("crypto_error");
         };
 
-        let mut metadata = load_metadata(&metadata_path).unwrap_or_default();
-        metadata.keystore_path = keystore_path.to_string_lossy().to_string();
-        metadata.address = format_address(wallet.address());
-        if save_metadata(&metadata_path, &metadata).is_err() {
-            return failed("os_error");
-        }
         self.clear_unlocked_state();
-        success(json!(metadata.address))
+        success(json!(format_address(wallet.address())))
     }
 
     #[func]
@@ -384,18 +372,14 @@ impl AlephVaultEvmNativeWallet {
         if !self.wallets.is_empty() {
             return failed("invalid_state");
         }
-        let metadata_path = metadata_path();
-        let Ok(metadata) = load_metadata(&metadata_path) else {
-            return failed("invalid_state");
-        };
-        if !metadata.has_account() {
+        let keystore_path = keystore_path();
+        if !Path::new(&keystore_path).exists() {
             return failed("invalid_state");
         }
-        if !metadata.keystore_path.is_empty() {
-            let _ = fs::remove_file(&metadata.keystore_path);
+        if fs::remove_file(&keystore_path).is_err() {
+            return failed("os_error");
         }
-        let _ = fs::remove_file(&metadata_path);
-        self.clear_ready_state();
+        self.clear_all_state();
         success(Value::Null)
     }
 
@@ -404,21 +388,11 @@ impl AlephVaultEvmNativeWallet {
         if !self.wallets.is_empty() {
             return failed("invalid_state");
         }
-        let Ok(metadata) = load_metadata(&metadata_path()) else {
-            return failed("invalid_state");
-        };
-        if !metadata.has_account() {
+        let keystore_path = keystore_path();
+        if !Path::new(&keystore_path).exists() {
             return failed("invalid_state");
         }
-        let Ok(keystore) = fs::read_to_string(&metadata.keystore_path) else {
-            return failed("invalid_storage");
-        };
-        let backup = json!({
-            "version": 1,
-            "metadata": metadata.to_json(),
-            "keystore": keystore,
-        });
-        if write_json_file(&globalize_path(&target_path.to_string()), &backup).is_err() {
+        if copy_file(&keystore_path, &globalize_path(&target_path.to_string())).is_err() {
             return failed("os_error");
         }
         success(Value::Null)
@@ -426,36 +400,26 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_restore(&mut self, source_path: GString) -> Dictionary {
-        let storage_dir = storage_dir();
-        let metadata_path = metadata_path();
-        if metadata_has_account(&metadata_path) {
+        if !self.wallets.is_empty() {
             return failed("invalid_state");
         }
-        let Ok(backup) = read_json_file(&globalize_path(&source_path.to_string())) else {
-            return failed("invalid_backup");
-        };
-        let Some(keystore) = backup.get("keystore").and_then(Value::as_str) else {
-            return failed("invalid_backup");
-        };
-        let Some(mut metadata) = backup.get("metadata").and_then(WalletMetadata::from_json) else {
-            return failed("invalid_backup");
-        };
-        if !metadata.has_account() {
+        let storage_dir = storage_dir();
+        let keystore_path = keystore_path();
+        if Path::new(&keystore_path).exists() {
+            return failed("invalid_state");
+        }
+        let source_path = globalize_path(&source_path.to_string());
+        if read_json_file(&source_path).is_err() {
             return failed("invalid_backup");
         }
         if fs::create_dir_all(&storage_dir).is_err() {
             return failed("os_error");
         }
-        let keystore_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
-        metadata.keystore_path = keystore_path.to_string_lossy().to_string();
-        if fs::write(&metadata.keystore_path, keystore).is_err() {
-            return failed("os_error");
-        }
-        if save_metadata(&metadata_path, &metadata).is_err() {
+        if copy_file(&source_path, &keystore_path).is_err() {
             return failed("os_error");
         }
         self.clear_unlocked_state();
-        success(json!(metadata.address))
+        success(Value::Null)
     }
 
     #[func]
@@ -463,16 +427,13 @@ impl AlephVaultEvmNativeWallet {
         if !self.wallets.is_empty() {
             return failed("invalid_state");
         }
-        let Ok(metadata) = load_metadata(&metadata_path()) else {
-            return failed("invalid_state");
-        };
-        if !metadata.has_account() {
+        let keystore_path = keystore_path();
+        if !Path::new(&keystore_path).exists() {
             return failed("invalid_state");
         }
-        let Ok(wallet) = PrivateKeySigner::decrypt_keystore(
-            &metadata.keystore_path,
-            password.to_string().as_bytes(),
-        ) else {
+        let Ok(wallet) =
+            PrivateKeySigner::decrypt_keystore(&keystore_path, password.to_string().as_bytes())
+        else {
             return failed("invalid_password");
         };
         let address = format_address(wallet.address());
@@ -502,10 +463,10 @@ impl AlephVaultEvmNativeWallet {
             return failed("empty_password");
         }
         let storage_dir = storage_dir();
-        let metadata_path = metadata_path();
-        let Ok(mut metadata) = load_metadata(&metadata_path) else {
+        let final_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
+        if !final_path.exists() {
             return failed("invalid_state");
-        };
+        }
         let Some(wallet) = self.wallets.values().next().cloned() else {
             return failed("invalid_state");
         };
@@ -515,7 +476,6 @@ impl AlephVaultEvmNativeWallet {
         let mut rng = thread_rng();
         let new_name = "account-new.json";
         let new_path = Path::new(&storage_dir).join(new_name);
-        let final_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
         if new_path.exists() {
             let _ = fs::remove_file(&new_path);
         }
@@ -528,19 +488,11 @@ impl AlephVaultEvmNativeWallet {
         ) else {
             return failed("crypto_error");
         };
-        let old_path = metadata.keystore_path.clone();
         if final_path.exists() && fs::remove_file(&final_path).is_err() {
             return failed("os_error");
         }
         if fs::rename(&new_path, &final_path).is_err() {
             return failed("os_error");
-        }
-        metadata.keystore_path = final_path.to_string_lossy().to_string();
-        if save_metadata(&metadata_path, &metadata).is_err() {
-            return failed("os_error");
-        }
-        if !old_path.is_empty() && old_path != metadata.keystore_path {
-            let _ = fs::remove_file(old_path);
         }
         success(Value::Null)
     }
@@ -560,15 +512,8 @@ impl AlephVaultEvmNativeWallet {
         if chain_id <= 0 {
             return failed("invalid_chain");
         }
-        let metadata_path = metadata_path();
-        let mut metadata = load_metadata(&metadata_path).unwrap_or_default();
-        metadata.rpc_url = rpc_url;
-        metadata.chain_id = chain_id;
-        if save_metadata(&metadata_path, &metadata).is_err() {
-            return failed("os_error");
-        }
-        self.rpc_url = metadata.rpc_url.clone();
-        self.chain_id = metadata.chain_id;
+        self.rpc_url = rpc_url;
+        self.chain_id = chain_id;
         success(self.config_json())
     }
 
@@ -1085,6 +1030,12 @@ impl AlephVaultEvmNativeWallet {
 
     fn clear_ready_state(&mut self) {
         self.ready = false;
+        self.accounts.clear();
+        self.wallets.clear();
+    }
+
+    fn clear_all_state(&mut self) {
+        self.ready = false;
         self.chain_id = 0;
         self.rpc_url.clear();
         self.accounts.clear();
@@ -1100,69 +1051,19 @@ impl AlephVaultEvmNativeWallet {
     }
 }
 
-#[derive(Default)]
-struct WalletMetadata {
-    rpc_url: String,
-    chain_id: i64,
-    keystore_path: String,
-    address: String,
-}
-
-impl WalletMetadata {
-    fn has_account(&self) -> bool {
-        !self.keystore_path.is_empty() && !self.address.is_empty()
-    }
-
-    fn has_chain(&self) -> bool {
-        self.chain_id > 0 && !self.rpc_url.is_empty()
-    }
-
-    fn to_json(&self) -> Value {
-        json!({
-            "rpc_url": self.rpc_url,
-            "chain_id": self.chain_id,
-            "keystore_path": self.keystore_path,
-            "address": self.address,
-        })
-    }
-
-    fn from_json(value: &Value) -> Option<Self> {
-        Some(Self {
-            rpc_url: value
-                .get("rpc_url")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            chain_id: value
-                .get("chain_id")
-                .and_then(chain_id_value_to_i64)
-                .unwrap_or_default(),
-            keystore_path: value
-                .get("keystore_path")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            address: value
-                .get("address")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-        })
-    }
-}
-
-fn metadata_has_account(path: &str) -> bool {
-    load_metadata(path)
-        .map(|metadata| metadata.has_account())
-        .unwrap_or(false)
-}
-
 fn storage_dir() -> String {
     globalize_path(STORAGE_DIR)
 }
 
-fn metadata_path() -> String {
-    globalize_path(METADATA_PATH)
+fn keystore_path() -> String {
+    Path::new(&storage_dir())
+        .join(KEYSTORE_FILE)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn keystore_exists() -> bool {
+    Path::new(&keystore_path()).exists()
 }
 
 fn globalize_path(path: &str) -> String {
@@ -1172,29 +1073,17 @@ fn globalize_path(path: &str) -> String {
         .to_string()
 }
 
-fn load_metadata(path: &str) -> Result<WalletMetadata, ()> {
-    if !Path::new(path).exists() {
-        return Err(());
-    }
-    let value = read_json_file(path)?;
-    WalletMetadata::from_json(&value).ok_or(())
-}
-
-fn save_metadata(path: &str, metadata: &WalletMetadata) -> Result<(), ()> {
-    write_json_file(path, &metadata.to_json())
-}
-
 fn read_json_file(path: &str) -> Result<Value, ()> {
     let contents = fs::read_to_string(path).map_err(|_| ())?;
     serde_json::from_str(&contents).map_err(|_| ())
 }
 
-fn write_json_file(path: &str, value: &Value) -> Result<(), ()> {
-    if let Some(parent) = PathBuf::from(path).parent() {
+fn copy_file(source: &str, target: &str) -> Result<(), ()> {
+    if let Some(parent) = PathBuf::from(target).parent() {
         fs::create_dir_all(parent).map_err(|_| ())?;
     }
-    let contents = serde_json::to_string(value).map_err(|_| ())?;
-    fs::write(path, contents).map_err(|_| ())
+    fs::copy(source, target).map_err(|_| ())?;
+    Ok(())
 }
 
 // Rationale: non-wallet JSON-RPC calls are intentionally thin pass-throughs so
