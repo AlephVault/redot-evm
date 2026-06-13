@@ -79,6 +79,10 @@ func get_chain_id():
 	_chain_id = _hex_quantity_to_int(String(response.get("value", "0x0")))
 	return Async.success(_chain_id)
 
+## Returns true because browser wallets can be asked to switch chains.
+func can_set_chain_id() -> bool:
+	return true
+
 ## Requests a wallet chain switch to chain_id.
 ##
 ## The chain id must be positive. The web binding calls

@@ -64,6 +64,10 @@ func get_chain_id():
 		_chain_id = int(response.get("value", 0))
 	return response
 
+## Returns false because native wallets are initialized with one fixed chain.
+func can_set_chain_id() -> bool:
+	return false
+
 func set_chain_id(chain_id: int):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")

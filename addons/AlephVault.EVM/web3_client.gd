@@ -440,6 +440,13 @@ func initialize(callback: Callable):
 func get_chain_id():
 	return _binding.get_chain_id()
 
+## Returns whether this binding can switch chain ids at runtime.
+##
+## Web bindings can request wallet chain switches. Native bindings are fixed to
+## the chain configured during initialize().
+func can_set_chain_id() -> bool:
+	return _binding.can_set_chain_id()
+
 ## Sets the chain id for this binding. Web bindings request a wallet chain
 ## switch. Native bindings keep this method only for compatibility and return
 ## {"ok": false, "error": "not_supported"} after initialization.
