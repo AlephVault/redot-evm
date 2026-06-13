@@ -440,6 +440,13 @@ func _init():
 ##   inside the binding).
 ##
 ## Native callback contract:
+## - The callback is invoked with the current binding as its only argument:
+##   callback.call(binding). The binding has the same public helper methods as
+##   the regular client surface. Private-key helpers, especially
+##   validate_private_key(private_key), are intentionally available before the
+##   binding is ready so the callback can validate/import keys while building
+##   the config. They fail only if the binding is incomplete, or if the key
+##   itself is invalid.
 ## - The callback may return the config dictionary directly, or a standard
 ##   {"ok": true, "value": Dictionary} / {"ok": false, "error": Variant}
 ##   response.

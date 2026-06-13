@@ -266,7 +266,8 @@ func validate_address(value: String, checksum: bool = false):
 func can_manage_private_keys() -> bool:
 	return false
 
-## Web builds cannot inspect or validate private keys.
+## Web builds cannot inspect or validate private keys. This does not depend on
+## readiness, so initialization code can probe capability consistently.
 func validate_private_key(_private_key: String):
 	return Async.failed("not_supported")
 

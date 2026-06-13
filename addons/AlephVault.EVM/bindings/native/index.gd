@@ -21,8 +21,12 @@ func _init():
 
 ## Initializes the native wallet from callback-provided config.
 ##
-## The callback may return either the config dictionary directly or a standard
-## {"ok": true, "value": Dictionary} response. Required config:
+## The callback is called as callback.call(self), so it can use this binding's
+## public helper methods before initialization completes. In particular,
+## validate_private_key() is available while the binding is not ready, and only
+## fails if the native extension is unavailable. The callback may return either
+## the config dictionary directly or a standard {"ok": true, "value":
+## Dictionary} response. Required config:
 ## - "chain_id" or "chainId": the fixed chain id for this wallet.
 ## - "rpc_url" or "rpcUrl": the RPC endpoint for that fixed chain.
 ## - "accounts" is an Array of dictionaries shaped as
@@ -41,7 +45,7 @@ func initialize(callback: Callable):
 	if not callback.is_valid():
 		return Async.failed("invalid_config")
 
-	var config_response = await callback.call()
+	var config_response = await callback.call(self)
 	if config_response is Dictionary and config_response.has("ok"):
 		if not config_response.get("ok", false):
 			return config_response
@@ -242,7 +246,9 @@ func validate_address(value: String, checksum: bool = false):
 func can_manage_private_keys() -> bool:
 	return true
 
-## Validates a private key and returns its derived checksum address.
+## Validates a private key and returns its derived checksum address. This works
+## before initialize() marks the binding ready; it only fails if the native
+## extension is unavailable or the key is invalid.
 func validate_private_key(private_key: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
