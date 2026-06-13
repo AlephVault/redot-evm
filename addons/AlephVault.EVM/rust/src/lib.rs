@@ -33,6 +33,8 @@ struct AlephVaultEvmNativeWallet {
 
 #[godot_api]
 impl IRefCounted for AlephVaultEvmNativeWallet {
+    // Rationale: Godot constructs RefCounted extension objects through this
+    // hook, so every cache starts empty until initialize() receives game data.
     fn init(base: Base<RefCounted>) -> Self {
         Self {
             base,
@@ -51,6 +53,9 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
 #[godot_api]
 impl AlephVaultEvmNativeWallet {
     #[func]
+    // Rationale: native builds cannot ask a browser wallet for state, so the
+    // game supplies chains and local signing keys through the initialization
+    // callback; this method validates and caches that state once.
     fn initialize(&mut self, config_json: GString) -> Dictionary {
         let Ok(config) = serde_json::from_str::<Value>(&config_json.to_string()) else {
             return failed("invalid_config");
@@ -130,6 +135,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: the binding facade exposes chain id as an integer, while raw
+    // RPC uses hex quantities; this is the local authoritative chain state.
     fn get_chain_id(&self) -> Dictionary {
         if !self.ready {
             return failed("not_ready");
@@ -138,6 +145,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: set_chain_id is the facade-level equivalent of
+    // wallet_switchEthereumChain; it switches only to configured/added chains.
     fn set_chain_id(&mut self, chain_id: i64, _config_json: GString) -> Dictionary {
         if !self.ready {
             return failed("not_ready");
@@ -163,6 +172,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: callers need the same account discovery surface on native as
+    // on web, but native accounts are derived from configured private keys.
     fn get_accounts(&self) -> Dictionary {
         if !self.ready {
             return failed("not_ready");
@@ -171,12 +182,12 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: most JSON-RPC calls should pass through unchanged, but wallet
+    // and signing methods must be implemented locally so private keys never
+    // leave the native binding.
     fn request(&mut self, method: GString, params_json: GString) -> Dictionary {
         let method = method.to_string();
-        if !self.ready && method != "eth_accounts" {
-            return failed("not_ready");
-        }
-        if self.rpc_url.is_empty() {
+        if !self.ready && method != "eth_accounts" && method != "eth_requestAccounts" {
             return failed("not_ready");
         }
 
@@ -203,7 +214,12 @@ impl AlephVaultEvmNativeWallet {
 
         let result = match local {
             Some(result) => result,
-            None => rpc_request(&self.rpc_url, &method, params),
+            None => {
+                if self.rpc_url.is_empty() {
+                    return failed("not_ready");
+                }
+                rpc_request(&self.rpc_url, &method, params)
+            }
         };
 
         match result {
@@ -213,6 +229,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: ABIs are cached by key so contract helpers can operate on a
+    // stable Godot-side handle without resending ABI JSON every call.
     fn set_abi(&mut self, key: GString, abi_json: GString) -> Dictionary {
         let key_string = key.to_string();
         if !is_identifier(&key_string) {
@@ -229,6 +247,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: exposing ABI retrieval keeps native and web bindings symmetric
+    // and lets users inspect or reuse previously registered ABI definitions.
     fn get_abi(&self, key: GString) -> Dictionary {
         match self.abis.get(&key.to_string()) {
             Some(abi) => match serde_json::from_str::<Value>(abi) {
@@ -240,6 +260,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: Keccak-256 is a core EVM primitive used for selectors,
+    // topics, address checksum calculation, and general dapp utilities.
     fn keccak256(&self, bytes: PackedByteArray) -> Dictionary {
         let input = bytes.to_vec();
         let mut output = [0u8; 32];
@@ -250,16 +272,22 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: unit conversion must be available offline and deterministic,
+    // independent of the connected RPC node.
     fn from_wei(&self, amount: GString, unit: GString) -> Dictionary {
         convert_from_wei(&amount.to_string(), &unit.to_string())
     }
 
     #[func]
+    // Rationale: native and web callers should use the same decimal-string
+    // amount API to avoid precision loss from floating point values.
     fn to_wei(&self, amount: GString, unit: GString) -> Dictionary {
         convert_to_wei(&amount.to_string(), &unit.to_string())
     }
 
     #[func]
+    // Rationale: checksum conversion is local validation/formatting logic and
+    // should not depend on a provider.
     fn to_checksum_address(&self, address: GString) -> Dictionary {
         let address = address.to_string();
         let Some(stripped) = normalize_address(&address) else {
@@ -269,6 +297,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: RPC transaction fields often need canonical hex quantities,
+    // while the public API represents large numbers as decimal strings.
     fn decimal_to_hex(&self, decimal: GString) -> Dictionary {
         let decimal = decimal.to_string();
         if !is_decimal_uint(&decimal) {
@@ -281,6 +311,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: balances and RPC quantities arrive as hex, but the addon API
+    // documents large numeric values as decimal strings.
     fn hex_to_decimal(&self, hex: GString) -> Dictionary {
         let hex = hex.to_string();
         if !is_prefixed_hex_quantity(&hex) {
@@ -293,6 +325,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: ABI and contract helpers need local range checks for unsigned
+    // Solidity integer sizes before encoding values.
     fn validate_uint(&self, value: GString, size: i64) -> Dictionary {
         let value = value.to_string();
         if !is_int_size(size) {
@@ -312,6 +346,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: signed Solidity integer validation is separate from unsigned
+    // validation because the accepted range is two's-complement sized.
     fn validate_int(&self, value: GString, size: i64) -> Dictionary {
         let value = value.to_string();
         if !is_int_size(size) {
@@ -329,6 +365,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: address validation is shared by signing, transfers, contract
+    // registration, and optional EIP-55 checksum enforcement.
     fn validate_address(&self, value: GString, checksum: bool) -> Dictionary {
         let value = value.to_string();
         let Some(stripped) = normalize_address(&value) else {
@@ -341,6 +379,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: explicit ABI encoding lets callers construct calldata or hash
+    // inputs without creating a contract instance.
     fn abi_encode(&self, args_json: GString) -> Dictionary {
         let Ok(args) = serde_json::from_str::<Value>(&args_json.to_string()) else {
             return failed("invalid_args");
@@ -352,6 +392,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: packed encoding is used by Solidity packed-hash workflows and
+    // must match the web helper's explicit-type behavior.
     fn abi_encode_packed(&self, args_json: GString) -> Dictionary {
         let Ok(args) = serde_json::from_str::<Value>(&args_json.to_string()) else {
             return failed("invalid_args");
@@ -366,6 +408,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: decoding raw ABI bytes is needed for eth_call results and for
+    // callers that manage calldata/result bytes manually.
     fn abi_decode(&self, bytes: PackedByteArray, spec_json: GString) -> Dictionary {
         let Ok(spec) = serde_json::from_str::<Value>(&spec_json.to_string()) else {
             return failed("invalid_spec");
@@ -382,6 +426,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: contract_create binds an address to a cached ABI key so later
+    // contract helpers can resolve ABI entries by address, matching web cache.
     fn contract_create(&mut self, address: GString, abi_key: GString) -> Dictionary {
         let address = address.to_string();
         if !is_non_zero_address(&address) {
@@ -396,6 +442,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: contract calls are either eth_call for view/pure functions or
+    // locally signed transactions for state-changing functions.
     fn contract_invoke(
         &self,
         address: GString,
@@ -478,6 +526,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: event queries are regular eth_getLogs calls plus local ABI
+    // decoding, so native can match web output without provider-side helpers.
     fn contract_get_events(
         &self,
         address: GString,
@@ -525,6 +575,8 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: receipts already contain logs, so transaction event decoding
+    // should be synchronous and use the registered contract ABI cache.
     fn contract_get_tx_events(&self, tx_obj_json: GString, event_json: GString) -> Dictionary {
         let Ok(tx_obj) = serde_json::from_str::<Value>(&tx_obj_json.to_string()) else {
             return failed("invalid_tx");
@@ -566,6 +618,8 @@ impl AlephVaultEvmNativeWallet {
         success(Value::Array(decoded))
     }
 
+    // Rationale: eth_sign signs the raw Keccak digest for compatibility with
+    // legacy provider semantics; it is intentionally not personal_sign.
     fn handle_eth_sign(&self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -586,6 +640,8 @@ impl AlephVaultEvmNativeWallet {
         Ok(json!(signature.to_string()))
     }
 
+    // Rationale: personal_sign applies the standard Ethereum message prefix
+    // through ethers_signers, matching browser-wallet behavior.
     fn handle_personal_sign(&self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -609,6 +665,8 @@ impl AlephVaultEvmNativeWallet {
         Ok(json!(signature.to_string()))
     }
 
+    // Rationale: typed-data variants are wallet-local signing methods; the
+    // node should never see typed data or private signing material.
     fn handle_sign_typed_data(&self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -632,6 +690,8 @@ impl AlephVaultEvmNativeWallet {
         Ok(json!(signature.to_string()))
     }
 
+    // Rationale: eth_signTransaction returns a raw signed transaction without
+    // broadcasting, useful for offline submission or user inspection.
     fn handle_sign_transaction(&self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -642,6 +702,8 @@ impl AlephVaultEvmNativeWallet {
         self.sign_transaction(tx)
     }
 
+    // Rationale: eth_sendTransaction must be local in native mode; the binding
+    // signs and forwards only eth_sendRawTransaction to the node.
     fn handle_send_transaction(&self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -652,6 +714,8 @@ impl AlephVaultEvmNativeWallet {
         self.sign_and_send_tx(tx).map(Value::String)
     }
 
+    // Rationale: wallet_addEthereumChain updates the native chain registry so
+    // later switches can use the added RPC endpoint without a browser wallet.
     fn handle_add_chain(&mut self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -682,6 +746,8 @@ impl AlephVaultEvmNativeWallet {
         Ok(Value::Null)
     }
 
+    // Rationale: wallet_switchEthereumChain changes local routing/signing
+    // context and refuses unknown chains with the standard 4902-style error.
     fn handle_switch_chain(&mut self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -709,17 +775,23 @@ impl AlephVaultEvmNativeWallet {
         Ok(Value::Null)
     }
 
+    // Rationale: signing methods identify the signer by address, so this maps
+    // JSON-RPC address arguments to cached local wallets.
     fn wallet_for_value(&self, value: &Value) -> Option<LocalWallet> {
         let address = value.as_str().and_then(parse_address)?;
         self.wallets.get(&address).cloned()
     }
 
+    // Rationale: transaction requests may omit "from"; in that case native
+    // mirrors common wallet behavior by using the first configured account.
     fn wallet_for_tx(&self, tx: &Value) -> Option<LocalWallet> {
         tx.get("from")
             .and_then(|value| self.wallet_for_value(value))
             .or_else(|| self.wallets.values().next().cloned())
     }
 
+    // Rationale: all transaction signing funnels through one path so nonce,
+    // gas, chain id, and typed transaction handling remain consistent.
     fn sign_transaction(&self, tx: &Value) -> Result<Value, Value> {
         let chain_id = tx
             .get("chainId")
@@ -737,6 +809,8 @@ impl AlephVaultEvmNativeWallet {
         Ok(json!(format!("0x{}", hex::encode(raw))))
     }
 
+    // Rationale: broadcasting is deliberately limited to eth_sendRawTransaction
+    // after local signing, preserving native-wallet custody.
     fn sign_and_send_tx(&self, tx: &Value) -> Result<String, Value> {
         let raw = self.sign_transaction(tx)?;
         let Some(raw) = raw.as_str() else {
@@ -749,6 +823,8 @@ impl AlephVaultEvmNativeWallet {
         }
     }
 
+    // Rationale: this normalizes JSON-RPC tx config into ethers typed
+    // transactions, filling nonce/gas/fees from RPC only when omitted.
     fn prepare_transaction(&self, tx: &Value, signer: Address) -> Result<TypedTransaction, Value> {
         let Some(to) = tx.get("to").and_then(Value::as_str).and_then(parse_address) else {
             return Err(json_rpc_error(-32602, "missing to"));
@@ -837,6 +913,8 @@ impl AlephVaultEvmNativeWallet {
         }
     }
 
+    // Rationale: registered contracts are keyed by normalized address, while
+    // ABI JSON is keyed separately to allow reuse across many contracts.
     fn contract_abi(&self, address: &str) -> Option<Abi> {
         let key = self.contracts.get(&checksum_or_lower(address))?;
         let abi_json = self.abis.get(key)?;
@@ -844,28 +922,17 @@ impl AlephVaultEvmNativeWallet {
     }
 }
 
+// Rationale: initialization expects account objects with privateKey and
+// optional name metadata; only valid keys become exposed/signing accounts.
 fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, LocalWallet>) {
     let mut wallets = HashMap::new();
     let mut accounts = Vec::new();
 
-    if let Some(private_keys) = config
-        .get("private_keys")
-        .or_else(|| config.get("privateKeys"))
-        .and_then(Value::as_array)
-    {
-        for key in private_keys.iter().filter_map(Value::as_str) {
-            if let Ok(wallet) = LocalWallet::from_str(key) {
-                accounts.push(format_address(wallet.address()));
-                wallets.insert(wallet.address(), wallet);
-            }
-        }
-    }
-
     if let Some(config_accounts) = config.get("accounts").and_then(Value::as_array) {
         for account in config_accounts {
             if let Some(key) = account
-                .get("private_key")
-                .or_else(|| account.get("privateKey"))
+                .as_object()
+                .and_then(|account| account.get("privateKey"))
                 .and_then(Value::as_str)
             {
                 if let Ok(wallet) = LocalWallet::from_str(key) {
@@ -874,18 +941,6 @@ fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, LocalWalle
                         accounts.push(address);
                     }
                     wallets.insert(wallet.address(), wallet);
-                    continue;
-                }
-            }
-            if let Some(address) = account
-                .as_str()
-                .or_else(|| account.get("address").and_then(Value::as_str))
-            {
-                if is_non_zero_address(address) {
-                    let address = checksum_address(&normalize_address(address).unwrap());
-                    if !accounts.iter().any(|known| known == &address) {
-                        accounts.push(address);
-                    }
                 }
             }
         }
@@ -894,6 +949,8 @@ fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, LocalWalle
     (accounts, wallets)
 }
 
+// Rationale: non-wallet JSON-RPC calls are intentionally thin pass-throughs so
+// the native binding follows node behavior for standard Ethereum methods.
 fn rpc_request(rpc_url: &str, method: &str, params: Value) -> Result<Value, Value> {
     let body = json!({
         "jsonrpc": "2.0",
@@ -916,10 +973,14 @@ fn rpc_request(rpc_url: &str, method: &str, params: Value) -> Result<Value, Valu
     Ok(body.get("result").cloned().unwrap_or(Value::Null))
 }
 
+// Rationale: locally handled wallet methods should return provider-like error
+// objects instead of addon-specific string errors.
 fn json_rpc_error(code: i64, message: &str) -> Value {
     json!({"code": code, "message": message})
 }
 
+// Rationale: parsed addresses are used for signing and tx construction, where
+// accepting zero or malformed addresses would create invalid transactions.
 fn parse_address(address: &str) -> Option<Address> {
     let bytes = decode_hex_bytes(address)?;
     if bytes.len() != 20 || bytes.iter().all(|byte| *byte == 0) {
@@ -928,16 +989,22 @@ fn parse_address(address: &str) -> Option<Address> {
     Some(Address::from_slice(&bytes))
 }
 
+// Rationale: public account/address output should be stable and EIP-55
+// checksummed across native and web bindings.
 fn format_address(address: Address) -> String {
     checksum_address(&hex::encode(address.as_bytes()))
 }
 
+// Rationale: contract cache lookups need a normalized key even if callers pass
+// mixed-case or non-checksummed address strings.
 fn checksum_or_lower(address: &str) -> String {
     normalize_address(address)
         .map(|address| checksum_address(&address))
         .unwrap_or_else(|| address.to_ascii_lowercase())
 }
 
+// Rationale: signing and ABI helpers accept either 0x hex bytes or plain UTF-8
+// strings, matching common provider conventions.
 fn value_to_bytes(value: &Value) -> Option<Vec<u8>> {
     match value {
         Value::String(value) if value.starts_with("0x") => decode_hex_bytes(value),
@@ -946,6 +1013,8 @@ fn value_to_bytes(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
+// Rationale: one strict hex decoder prevents each caller from reimplementing
+// prefix, even-length, and hex-character validation.
 fn decode_hex_bytes(hex: &str) -> Option<Vec<u8>> {
     let stripped = hex.strip_prefix("0x").unwrap_or(hex);
     if stripped.len() % 2 != 0 || !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -954,6 +1023,8 @@ fn decode_hex_bytes(hex: &str) -> Option<Vec<u8>> {
     hex::decode(stripped).ok()
 }
 
+// Rationale: chain and block quantities must reject leading-zero/noncanonical
+// forms according to JSON-RPC quantity rules.
 fn hex_quantity_to_i64(hex: &str) -> Option<i64> {
     if !is_prefixed_hex_quantity(hex) {
         return None;
@@ -961,6 +1032,8 @@ fn hex_quantity_to_i64(hex: &str) -> Option<i64> {
     i64::from_str_radix(&hex[2..], 16).ok()
 }
 
+// Rationale: addon config is authored by games, so accepting int, decimal
+// string, and hex quantity reduces friction while normalizing internally.
 fn chain_id_value_to_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Number(value) => value.as_i64(),
@@ -970,6 +1043,8 @@ fn chain_id_value_to_i64(value: &Value) -> Option<i64> {
     }
 }
 
+// Rationale: tx and ABI numeric fields can arrive as JSON numbers, decimal
+// strings, or RPC hex quantities, but ethers needs U256.
 fn value_to_u256(value: &Value) -> Option<U256> {
     match value {
         Value::String(value) if value.starts_with("0x") => {
@@ -981,10 +1056,14 @@ fn value_to_u256(value: &Value) -> Option<U256> {
     }
 }
 
+// Rationale: Godot cannot safely represent large EVM integers as native ints,
+// so decoded integer output is always a decimal string.
 fn u256_to_json(value: U256) -> Value {
     Value::String(value.to_string())
 }
 
+// Rationale: several helpers need raw Keccak bytes rather than a Godot
+// response dictionary, so this is the internal primitive.
 fn keccak_bytes(bytes: &[u8]) -> [u8; 32] {
     let mut output = [0u8; 32];
     let mut hasher = Keccak::v256();
@@ -993,6 +1072,8 @@ fn keccak_bytes(bytes: &[u8]) -> [u8; 32] {
     output
 }
 
+// Rationale: contract invocation must set authoritative to/data/value fields
+// while preserving caller-supplied tx config such as gas, fees, nonce, from.
 fn merge_tx_json(tx_params: &Value, to: &str, data: &str, value: Option<&str>) -> Value {
     let mut tx = tx_params.as_object().cloned().unwrap_or_default();
     tx.insert("to".to_owned(), Value::String(to.to_owned()));
@@ -1003,6 +1084,8 @@ fn merge_tx_json(tx_params: &Value, to: &str, data: &str, value: Option<&str>) -
     Value::Object(tx)
 }
 
+// Rationale: free-form ABI helpers accept either explicit {type,value} entries
+// or inferred plain values, matching the web helper contract.
 fn abi_args_to_tokens(args: &Value) -> Option<Vec<Token>> {
     let args = args.as_array()?;
     let mut tokens = Vec::new();
@@ -1019,11 +1102,15 @@ fn abi_args_to_tokens(args: &Value) -> Option<Vec<Token>> {
     Some(tokens)
 }
 
+// Rationale: ABI decoding takes only type specs, so this extracts ethers
+// ParamType values from strings or ABI-like dictionaries.
 fn abi_spec_to_types(spec: &Value) -> Option<Vec<ParamType>> {
     let spec = spec.as_array()?;
     spec.iter().map(abi_spec_item_to_type).collect()
 }
 
+// Rationale: each decode spec item supports the same string-or-dictionary
+// shapes documented for the Godot facade.
 fn abi_spec_item_to_type(spec: &Value) -> Option<ParamType> {
     if let Some(type_name) = spec.as_str() {
         return parse_param_type(type_name);
@@ -1032,10 +1119,14 @@ fn abi_spec_item_to_type(spec: &Value) -> Option<ParamType> {
     parse_param_type(object.get("type")?.as_str()?)
 }
 
+// Rationale: ethers' ABI reader is the source of truth for Solidity type
+// syntax instead of maintaining a partial parser.
 fn parse_param_type(type_name: &str) -> Option<ParamType> {
     ethers_core::abi::param_type::Reader::read(type_name).ok()
 }
 
+// Rationale: contract calls already know ABI input types, so values should be
+// encoded against those exact types rather than inferred.
 fn values_to_param_tokens(values: &Value, params: &[Param]) -> Option<Vec<Token>> {
     let values = values.as_array()?;
     if values.len() != params.len() {
@@ -1048,6 +1139,8 @@ fn values_to_param_tokens(values: &Value, params: &[Param]) -> Option<Vec<Token>
         .collect()
 }
 
+// Rationale: this is the typed conversion boundary from Godot/JSON values into
+// ethers ABI tokens for contract calls and explicit ABI encoding.
 fn value_to_token(value: &Value, kind: &ParamType) -> Option<Token> {
     match kind {
         ParamType::Address => Some(Token::Address(value.as_str().and_then(parse_address)?)),
@@ -1098,6 +1191,8 @@ fn value_to_token(value: &Value, kind: &ParamType) -> Option<Token> {
     }
 }
 
+// Rationale: untyped ABI encoding exists for convenience; inference is kept
+// intentionally close to the web helper, where 0x strings infer as bytes.
 fn infer_token(value: &Value) -> Option<Token> {
     match value {
         Value::Bool(value) => Some(Token::Bool(*value)),
@@ -1118,6 +1213,8 @@ fn infer_token(value: &Value) -> Option<Token> {
     }
 }
 
+// Rationale: decoded ABI values must cross the Godot boundary as JSON-friendly
+// variants with large integers preserved as strings.
 fn token_to_json(token: Token) -> Value {
     match token {
         Token::Address(value) => Value::String(format_address(value)),
@@ -1133,6 +1230,8 @@ fn token_to_json(token: Token) -> Value {
     }
 }
 
+// Rationale: method selectors can be a name or full ABI entry; overloads by
+// name are resolved by arity to match the existing web helper behavior.
 fn resolve_function(abi: &Abi, method: &Value, params: &Value) -> Option<Function> {
     if let Some(name) = method.as_str() {
         let arity = params.as_array().map(Vec::len).unwrap_or_default();
@@ -1146,6 +1245,8 @@ fn resolve_function(abi: &Abi, method: &Value, params: &Value) -> Option<Functio
     serde_json::from_value::<Function>(method.clone()).ok()
 }
 
+// Rationale: event selectors follow the same name-or-ABI-entry convention as
+// contract methods, with the first named overload matching web behavior.
 fn resolve_event(abi: &Abi, event: &Value) -> Option<Event> {
     if let Some(name) = event.as_str() {
         return abi.events_by_name(name).ok()?.first().cloned();
@@ -1153,6 +1254,8 @@ fn resolve_event(abi: &Abi, event: &Value) -> Option<Event> {
     serde_json::from_value::<Event>(event.clone()).ok()
 }
 
+// Rationale: event topic filtering accepts either raw topic slots or a map of
+// indexed argument names, then produces an eth_getLogs topic array.
 fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
     let mut output = vec![Value::String(format!("{:#x}", event.signature()))];
     if topics.is_null() {
@@ -1202,6 +1305,8 @@ fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
     None
 }
 
+// Rationale: logs are decoded locally so native returns the same {rawLog,name,
+// args} shape as the web helper without needing JavaScript contracts.
 fn decode_event_log(event: &Event, log: &Value) -> Option<Value> {
     let topics: Vec<H256> = log
         .get("topics")?
@@ -1236,6 +1341,8 @@ fn decode_event_log(event: &Event, log: &Value) -> Option<Value> {
     }))
 }
 
+// Rationale: invalid numeric block ranges are caller errors and should be
+// rejected before sending eth_getLogs.
 fn valid_block_range(from: &str, to: &str) -> bool {
     if !(is_named_block_tag(from) || is_prefixed_hex_quantity(from)) {
         return false;
@@ -1249,6 +1356,8 @@ fn valid_block_range(from: &str, to: &str) -> bool {
     true
 }
 
+// Rationale: fromWei is deterministic decimal arithmetic and does not require
+// a node or wallet.
 fn convert_from_wei(amount: &str, unit: &str) -> Dictionary {
     if !is_decimal_uint(amount) {
         return failed("invalid_amount");
@@ -1262,6 +1371,8 @@ fn convert_from_wei(amount: &str, unit: &str) -> Dictionary {
     success(json!(format_units(value, decimals)))
 }
 
+// Rationale: toWei must preserve decimal precision by operating on strings
+// instead of floats.
 fn convert_to_wei(amount: &str, unit: &str) -> Dictionary {
     let Some(decimals) = unit_decimals(unit) else {
         return failed("invalid_unit");
@@ -1272,6 +1383,8 @@ fn convert_to_wei(amount: &str, unit: &str) -> Dictionary {
     success(json!(value.to_str_radix(10)))
 }
 
+// Rationale: supported units are centralized so conversion validation and
+// scaling stay consistent in both directions.
 fn unit_decimals(unit: &str) -> Option<usize> {
     match unit {
         "wei" => Some(0),
@@ -1285,6 +1398,8 @@ fn unit_decimals(unit: &str) -> Option<usize> {
     }
 }
 
+// Rationale: decimal user input needs exact fixed-point parsing into an integer
+// wei amount with no rounding.
 fn parse_units(amount: &str, decimals: usize) -> Option<BigUint> {
     if amount.is_empty() || amount.starts_with('-') {
         return None;
@@ -1306,6 +1421,8 @@ fn parse_units(amount: &str, decimals: usize) -> Option<BigUint> {
     BigUint::parse_bytes(digits.as_bytes(), 10)
 }
 
+// Rationale: integer wei amounts should format to the shortest exact decimal
+// representation for display or further string processing.
 fn format_units(value: BigUint, decimals: usize) -> String {
     if decimals == 0 {
         return value.to_str_radix(10);
@@ -1326,6 +1443,8 @@ fn format_units(value: BigUint, decimals: usize) -> String {
     format!("{}.{}", integer.to_str_radix(10), fractional_string)
 }
 
+// Rationale: EIP-55 checksum casing is computed locally from lowercase address
+// bytes using Keccak.
 fn checksum_address(stripped: &str) -> String {
     let lower = stripped.to_ascii_lowercase();
     let hash = keccak_hex(lower.as_bytes());
@@ -1341,6 +1460,8 @@ fn checksum_address(stripped: &str) -> String {
     output
 }
 
+// Rationale: checksum generation needs a hex-form Keccak digest, distinct from
+// the byte-array helper exposed to Godot.
 fn keccak_hex(bytes: &[u8]) -> String {
     let mut output = [0u8; 32];
     let mut hasher = Keccak::v256();
@@ -1349,6 +1470,8 @@ fn keccak_hex(bytes: &[u8]) -> String {
     hex::encode(output)
 }
 
+// Rationale: many validators need the same optional-0x stripping and 40-hex
+// digit check before further address handling.
 fn normalize_address(address: &str) -> Option<String> {
     let stripped = address.strip_prefix("0x").unwrap_or(address);
     if stripped.len() != 40 || !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -1357,12 +1480,16 @@ fn normalize_address(address: &str) -> Option<String> {
     Some(stripped.to_owned())
 }
 
+// Rationale: transfers and contract registration reject the zero address even
+// though it is syntactically valid hex.
 fn is_non_zero_address(address: &str) -> bool {
     normalize_address(address)
         .map(|stripped| stripped.chars().any(|c| c != '0'))
         .unwrap_or(false)
 }
 
+// Rationale: checksum validation compares against a 0x-prefixed canonical
+// string regardless of how the caller supplied the address.
 fn ensure_0x(address: &str) -> String {
     if address.starts_with("0x") {
         address.to_owned()
@@ -1371,18 +1498,26 @@ fn ensure_0x(address: &str) -> String {
     }
 }
 
+// Rationale: ABI cache keys are constrained to simple identifiers to avoid
+// confusing or path-like keys crossing language boundaries.
 fn is_identifier(key: &str) -> bool {
     !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+// Rationale: decimal unsigned values are represented as strings and must be
+// validated before bigint parsing.
 fn is_decimal_uint(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|c| c.is_ascii_digit())
 }
 
+// Rationale: Solidity int/uint sizes are limited to multiples of 8 through 256
+// bits.
 fn is_int_size(size: i64) -> bool {
     size >= 8 && size <= 256 && size % 8 == 0
 }
 
+// Rationale: JSON-RPC quantities differ from arbitrary hex bytes by requiring
+// 0x prefix, at least one digit, and no leading zeroes except 0x0.
 fn is_prefixed_hex_quantity(hex: &str) -> bool {
     hex.starts_with("0x")
         && hex.len() > 2
@@ -1391,6 +1526,8 @@ fn is_prefixed_hex_quantity(hex: &str) -> bool {
         && hex[2..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
+// Rationale: block tags can be named values as well as numeric quantities in
+// Ethereum JSON-RPC.
 fn is_named_block_tag(tag: &str) -> bool {
     matches!(
         tag,
@@ -1398,6 +1535,8 @@ fn is_named_block_tag(tag: &str) -> bool {
     )
 }
 
+// Rationale: every Godot-facing method returns the addon-standard success
+// dictionary shape.
 fn success(value: Value) -> Dictionary {
     let mut dictionary = Dictionary::new();
     dictionary.set("ok", true);
@@ -1405,6 +1544,8 @@ fn success(value: Value) -> Dictionary {
     dictionary
 }
 
+// Rationale: byte-returning helpers should produce PackedByteArray directly
+// instead of hex strings where the facade documents bytes.
 fn success_bytes(bytes: Vec<u8>) -> Dictionary {
     let mut packed = PackedByteArray::new();
     for byte in bytes {
@@ -1416,6 +1557,8 @@ fn success_bytes(bytes: Vec<u8>) -> Dictionary {
     dictionary
 }
 
+// Rationale: addon validation failures use short string codes that match the
+// documented GDScript facade.
 fn failed(error: &str) -> Dictionary {
     let mut dictionary = Dictionary::new();
     dictionary.set("ok", false);
@@ -1423,6 +1566,8 @@ fn failed(error: &str) -> Dictionary {
     dictionary
 }
 
+// Rationale: JSON-RPC/provider failures can be structured objects, so errors
+// must preserve arbitrary JSON-compatible values.
 fn error_response(error: Value) -> Dictionary {
     let mut dictionary = Dictionary::new();
     dictionary.set("ok", false);
@@ -1430,6 +1575,8 @@ fn error_response(error: Value) -> Dictionary {
     dictionary
 }
 
+// Rationale: Rust JSON values must be converted into Godot Variants before
+// crossing the GDExtension boundary.
 fn json_to_variant(value: Value) -> Variant {
     match value {
         Value::Null => Variant::nil(),

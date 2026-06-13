@@ -426,10 +426,10 @@ func _init():
 ##   0x-prefixed hex quantity, and must include "rpc_url" or "rpcUrl".
 ## - The selected chain is read from top-level "chain_id" or "chainId"; if
 ##   omitted, the first configured chain is used.
-## - Accounts are read from top-level "private_keys" / "privateKeys" and/or
-##   from "accounts". Each account entry may be a display-only address string,
-##   {"address": String}, or a signing account with "private_key" /
-##   "privateKey". Local signing and sending requires a matching private key.
+## - Accounts are read from "accounts", an array of dictionaries shaped as
+##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null,
+##   or absent; it is currently metadata only. Every exposed native account is
+##   derived from a valid privateKey and can sign locally.
 ## - Transaction config dictionaries use JSON-RPC/web3 names: "from", "gas",
 ##   "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "chainId",
 ##   and "value". "gasLimit" and "chain_id" are also accepted natively as

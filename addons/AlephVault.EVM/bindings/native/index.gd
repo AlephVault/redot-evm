@@ -25,9 +25,10 @@ func _init():
 ## - "chains": non-empty Array of chain dictionaries. Each chain needs an id
 ##   in "id", "chain_id", or "chainId", plus "rpc_url" or "rpcUrl".
 ## - Optional top-level "chain_id" or "chainId" selects the initial chain.
-## - Signing accounts come from "private_keys" / "privateKeys" or account
-##   dictionaries with "private_key" / "privateKey". Address-only accounts are
-##   exposed by get_accounts(), but cannot sign transactions.
+## - "accounts" is an Array of dictionaries shaped as
+##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null, or
+##   absent; it is metadata only. Accounts without valid privateKey values are
+##   ignored because every native account must support local signing.
 func initialize(callback: Callable):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
