@@ -120,7 +120,13 @@ func request(method: String, params: Array):
 		return Async.failed("incomplete_binding")
 	if not _ready and method != "eth_accounts":
 		return Async.failed("not_ready")
-	return _wallet.request(method, JSON.stringify(params))
+	var response = _wallet.request(method, JSON.stringify(params))
+	if response.get("ok", false) and method == "wallet_switchEthereumChain":
+		var chain_response = _wallet.get_chain_id()
+		if chain_response.get("ok", false):
+			_chain_id = int(chain_response.get("value", 0))
+			chain_changed.emit(_chain_id)
+	return response
 
 func set_abi(key: String, abi: Array[Dictionary]):
 	if _wallet == null:

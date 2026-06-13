@@ -7,6 +7,9 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+ethers-core = "2"
+ethers-signers = "2"
+futures = "0.3"
 godot = "0.2"
 hex = "0.4"
 num-bigint = "0.4"
