@@ -28,7 +28,6 @@ struct AlephVaultEvmNativeWallet {
     wallets: HashMap<Address, LocalWallet>,
     abis: HashMap<String, String>,
     contracts: HashMap<String, String>,
-    chains: HashMap<i64, Value>,
 }
 
 #[godot_api]
@@ -45,7 +44,6 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
             wallets: HashMap::new(),
             abis: HashMap::new(),
             contracts: HashMap::new(),
-            chains: HashMap::new(),
         }
     }
 }
@@ -54,57 +52,28 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
 impl AlephVaultEvmNativeWallet {
     #[func]
     // Rationale: native builds cannot ask a browser wallet for state, so the
-    // game supplies chains and local signing keys through the initialization
-    // callback; this method validates and caches that state once.
+    // game supplies one fixed RPC chain and local signing keys through the
+    // initialization callback; this method validates and caches that state.
     fn initialize(&mut self, config_json: GString) -> Dictionary {
         let Ok(config) = serde_json::from_str::<Value>(&config_json.to_string()) else {
             return failed("invalid_config");
         };
 
-        let chains = config
-            .get("chains")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if chains.is_empty() {
-            return failed("no_valid_chains");
-        }
-
-        let selected_chain_id = config
+        let Some(chain_id) = config
             .get("chain_id")
             .or_else(|| config.get("chainId"))
             .and_then(chain_id_value_to_i64)
-            .or_else(|| {
-                chains
-                    .first()
-                    .and_then(|chain| chain.get("id"))
-                    .or_else(|| chains.first().and_then(|chain| chain.get("chain_id")))
-                    .or_else(|| chains.first().and_then(|chain| chain.get("chainId")))
-                    .and_then(chain_id_value_to_i64)
-            });
-
-        let Some(chain_id) = selected_chain_id else {
-            return failed("no_valid_chains");
-        };
-
-        let Some(chain) = chains
-            .iter()
-            .find(|chain| {
-                chain
-                    .get("id")
-                    .or_else(|| chain.get("chain_id"))
-                    .or_else(|| chain.get("chainId"))
-                    .and_then(chain_id_value_to_i64)
-                    == Some(chain_id)
-            })
-            .or_else(|| chains.first())
         else {
             return failed("no_valid_chains");
         };
 
-        let Some(rpc_url) = chain
+        if chain_id <= 0 {
+            return failed("no_valid_chains");
+        }
+
+        let Some(rpc_url) = config
             .get("rpc_url")
-            .or_else(|| chain.get("rpcUrl"))
+            .or_else(|| config.get("rpcUrl"))
             .and_then(Value::as_str)
         else {
             return failed("no_valid_chains");
@@ -120,17 +89,6 @@ impl AlephVaultEvmNativeWallet {
         self.rpc_url = rpc_url.to_owned();
         self.accounts = accounts;
         self.wallets = wallets;
-        self.chains = chains
-            .iter()
-            .filter_map(|chain| {
-                chain
-                    .get("id")
-                    .or_else(|| chain.get("chain_id"))
-                    .or_else(|| chain.get("chainId"))
-                    .and_then(chain_id_value_to_i64)
-                    .map(|id| (id, chain.clone()))
-            })
-            .collect();
         success(json!(self.accounts))
     }
 
@@ -145,30 +103,13 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
-    // Rationale: set_chain_id is the facade-level equivalent of
-    // wallet_switchEthereumChain; it switches only to configured/added chains.
-    fn set_chain_id(&mut self, chain_id: i64, _config_json: GString) -> Dictionary {
+    // Rationale: the native wallet is intentionally bound to exactly one RPC
+    // chain from initialize(); this compatibility method fails predictably.
+    fn set_chain_id(&mut self, _chain_id: i64, _config_json: GString) -> Dictionary {
         if !self.ready {
             return failed("not_ready");
         }
-        if chain_id <= 0 {
-            return failed("invalid_chain");
-        }
-
-        let Some(chain) = self.chains.get(&chain_id) else {
-            return failed("invalid_chain");
-        };
-        let Some(rpc_url) = chain
-            .get("rpc_url")
-            .or_else(|| chain.get("rpcUrl"))
-            .and_then(Value::as_str)
-        else {
-            return failed("invalid_chain");
-        };
-
-        self.chain_id = chain_id;
-        self.rpc_url = rpc_url.to_owned();
-        success(Value::Null)
+        failed("not_supported")
     }
 
     #[func]
@@ -714,65 +655,16 @@ impl AlephVaultEvmNativeWallet {
         self.sign_and_send_tx(tx).map(Value::String)
     }
 
-    // Rationale: wallet_addEthereumChain updates the native chain registry so
-    // later switches can use the added RPC endpoint without a browser wallet.
-    fn handle_add_chain(&mut self, params: &Value) -> Result<Value, Value> {
-        let Some(values) = params.as_array() else {
-            return Err(json_rpc_error(-32602, "invalid params"));
-        };
-        let Some(chain) = values.first().and_then(Value::as_object) else {
-            return Err(json_rpc_error(-32602, "invalid params"));
-        };
-        let chain_id = chain
-            .get("chainId")
-            .and_then(Value::as_str)
-            .and_then(hex_quantity_to_i64)
-            .ok_or_else(|| json_rpc_error(-32602, "invalid chain id"))?;
-        let rpc_url = chain
-            .get("rpcUrls")
-            .and_then(Value::as_array)
-            .and_then(|urls| urls.first())
-            .and_then(Value::as_str)
-            .or_else(|| chain.get("rpc_url").and_then(Value::as_str))
-            .or_else(|| chain.get("rpcUrl").and_then(Value::as_str))
-            .ok_or_else(|| json_rpc_error(-32602, "missing rpc url"))?;
-
-        let mut stored = Value::Object(chain.clone());
-        if let Value::Object(ref mut object) = stored {
-            object.insert("id".to_owned(), json!(chain_id));
-            object.insert("rpc_url".to_owned(), json!(rpc_url));
-        }
-        self.chains.insert(chain_id, stored);
-        Ok(Value::Null)
+    // Rationale: chain addition is a browser-wallet concern; native games must
+    // choose their single RPC chain during initialize().
+    fn handle_add_chain(&mut self, _params: &Value) -> Result<Value, Value> {
+        Err(json_rpc_error(-32004, "not_supported"))
     }
 
-    // Rationale: wallet_switchEthereumChain changes local routing/signing
-    // context and refuses unknown chains with the standard 4902-style error.
-    fn handle_switch_chain(&mut self, params: &Value) -> Result<Value, Value> {
-        let Some(values) = params.as_array() else {
-            return Err(json_rpc_error(-32602, "invalid params"));
-        };
-        let Some(chain) = values.first().and_then(Value::as_object) else {
-            return Err(json_rpc_error(-32602, "invalid params"));
-        };
-        let chain_id = chain
-            .get("chainId")
-            .and_then(Value::as_str)
-            .and_then(hex_quantity_to_i64)
-            .ok_or_else(|| json_rpc_error(4902, "unknown chain"))?;
-        let Some(chain) = self.chains.get(&chain_id) else {
-            return Err(json_rpc_error(4902, "unknown chain"));
-        };
-        let Some(rpc_url) = chain
-            .get("rpc_url")
-            .or_else(|| chain.get("rpcUrl"))
-            .and_then(Value::as_str)
-        else {
-            return Err(json_rpc_error(4902, "unknown chain"));
-        };
-        self.chain_id = chain_id;
-        self.rpc_url = rpc_url.to_owned();
-        Ok(Value::Null)
+    // Rationale: the native wallet has no external chain picker, so switching
+    // chains is unsupported and chain_changed is never emitted.
+    fn handle_switch_chain(&mut self, _params: &Value) -> Result<Value, Value> {
+        Err(json_rpc_error(-32004, "not_supported"))
     }
 
     // Rationale: signing methods identify the signer by address, so this maps

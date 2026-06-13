@@ -5,7 +5,8 @@ const Async = AlephVault__EVM.Utils.Async
 ## Emitted when the native wallet reports an account list change.
 signal accounts_changed(accounts: Array)
 
-## Emitted when the browser wallet reports a chain change.
+## Present for compatibility with the common binding surface. The native wallet
+## is initialized with one fixed chain, so this signal is never emitted.
 signal chain_changed(chain_id: int)
 
 var _wallet: Object = null
@@ -22,9 +23,8 @@ func _init():
 ##
 ## The callback may return either the config dictionary directly or a standard
 ## {"ok": true, "value": Dictionary} response. Required config:
-## - "chains": non-empty Array of chain dictionaries. Each chain needs an id
-##   in "id", "chain_id", or "chainId", plus "rpc_url" or "rpcUrl".
-## - Optional top-level "chain_id" or "chainId" selects the initial chain.
+## - "chain_id" or "chainId": the fixed chain id for this wallet.
+## - "rpc_url" or "rpcUrl": the RPC endpoint for that fixed chain.
 ## - "accounts" is an Array of dictionaries shaped as
 ##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null, or
 ##   absent; it is metadata only. Accounts without valid privateKey values are
@@ -67,11 +67,7 @@ func get_chain_id():
 func set_chain_id(chain_id: int):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	var response = _wallet.set_chain_id(chain_id, JSON.stringify(_config))
-	if response.get("ok", false):
-		_chain_id = chain_id
-		chain_changed.emit(_chain_id)
-	return response
+	return _wallet.set_chain_id(chain_id, JSON.stringify(_config))
 
 func get_accounts():
 	if _wallet == null:
@@ -137,13 +133,7 @@ func request(method: String, params: Array):
 		return Async.failed("incomplete_binding")
 	if not _ready and method != "eth_accounts" and method != "eth_requestAccounts":
 		return Async.failed("not_ready")
-	var response = _wallet.request(method, JSON.stringify(params))
-	if response.get("ok", false) and method == "wallet_switchEthereumChain":
-		var chain_response = _wallet.get_chain_id()
-		if chain_response.get("ok", false):
-			_chain_id = int(chain_response.get("value", 0))
-			chain_changed.emit(_chain_id)
-	return response
+	return _wallet.request(method, JSON.stringify(params))
 
 func set_abi(key: String, abi: Array[Dictionary]):
 	if _wallet == null:

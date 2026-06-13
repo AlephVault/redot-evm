@@ -96,8 +96,8 @@ func _init():
 #      when connecting to the page's domain (web).
 #    - {"ok": false, "error": String}
 #      Where error is an error code. Typically: "user_rejected".
-#      Other possible options are "no_valid_chains" if no chains
-#      are configured, or "no_valid_accounts" if no accounts are
+#      Other possible options are "no_valid_chains" if no native chain
+#      is configured, or "no_valid_accounts" if no accounts are
 #      configured (neither by import nor by seed). Another possible
 #      code is "incomplete_binding" if, somehow, the binding could
 #      not be created (e.g. the native implementation is somehow
@@ -421,11 +421,9 @@ func _init():
 ## - The callback may return the config dictionary directly, or a standard
 ##   {"ok": true, "value": Dictionary} / {"ok": false, "error": Variant}
 ##   response.
-## - The config must include "chains", a non-empty array. Each chain accepts
-##   "id", "chain_id", or "chainId" as an integer, decimal string, or
-##   0x-prefixed hex quantity, and must include "rpc_url" or "rpcUrl".
-## - The selected chain is read from top-level "chain_id" or "chainId"; if
-##   omitted, the first configured chain is used.
+## - The config must include one fixed native chain: "chain_id" or "chainId"
+##   as an integer, decimal string, or 0x-prefixed hex quantity, plus
+##   "rpc_url" or "rpcUrl".
 ## - Accounts are read from "accounts", an array of dictionaries shaped as
 ##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null,
 ##   or absent; it is currently metadata only. Every exposed native account is
@@ -437,15 +435,14 @@ func _init():
 func initialize(callback: Callable):
 	return _binding.initialize(callback)
 
-## Returns the chain id for this binding. A binding is connected
-## to a single chain id at a given time, and that chain id may
-## change later.
+## Returns the chain id for this binding. Web bindings can observe wallet-side
+## chain changes. Native bindings are initialized with one fixed chain.
 func get_chain_id():
 	return _binding.get_chain_id()
 
-## Sets the chain id for this binding. A binding is connected to
-## a single chain id at a given time, and that chain id may
-## change later.
+## Sets the chain id for this binding. Web bindings request a wallet chain
+## switch. Native bindings keep this method only for compatibility and return
+## {"ok": false, "error": "not_supported"} after initialization.
 func set_chain_id(chain_id: int):
 	return _binding.set_chain_id(chain_id)
 
@@ -465,9 +462,8 @@ var accounts_changed:
 	set(value):
 		push_error("accounts_changed cannot be set this way")
 
-## A signal chain_changed(chain_id: int) to track when the chain
-## was changed by an external interface (most likely, a browser
-## extension) or a call of set_chain_id(chain_id).
+## A signal chain_changed(chain_id: int) to track web wallet chain changes.
+## Native bindings keep the signal for compatibility but never emit it.
 var chain_changed:
 	get:
 		return _binding.chain_changed
