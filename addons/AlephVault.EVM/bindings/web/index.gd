@@ -1,6 +1,6 @@
 extends RefCounted
 
-const Async = preload("../../utils/async.gd")
+const Async = AlephVault__EVM.Utils.Async
 const AsyncRequest = preload("./utils/async_request.gd")
 
 ## Emitted when the browser wallet reports an account list change.
