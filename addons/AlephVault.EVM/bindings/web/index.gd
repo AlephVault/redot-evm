@@ -125,12 +125,13 @@ func get_balance(address: String):
 ## Transfers wei to a valid non-zero EVM address.
 ##
 ## amount is a decimal numeric string denominated in wei. tx_config is a
-## JSON-serializable EVM transaction configuration dictionary. Standard keys
-## include "from", "gas", "gasPrice", "maxFeePerGas",
-## "maxPriorityFeePerGas", "nonce", and "chainId"; bindings may accept extra
-## provider/native-specific keys. The web binding sets "to" and "value" from
-## address and amount, so callers should not rely on conflicting tx_config
-## values for those keys.
+## JSON-serializable EVM transaction configuration dictionary. Common keys are
+## "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
+## "maxPriorityFeePerGas", "nonce", "chainId", "chain_id", and "data".
+## Numeric fields accept decimal strings, 0x-prefixed hex quantities, or JSON
+## integers; use strings for large values. The web binding sets "to" and
+## "value" from address and amount, so callers should not rely on conflicting
+## tx_config values for those keys.
 func transfer(address: String, amount: String, tx_config: Dictionary):
 	if not _ready:
 		return Async.failed("not_ready")
@@ -292,8 +293,7 @@ func contract_create(address: String, abi_key: String):
 ## method can be a function name or a function ABI entry dictionary. params are
 ## passed to the Web3 method builder. tx_params uses the same JSON-serializable
 ## EVM transaction configuration dictionary syntax as transfer()'s tx_config.
-## Standard keys include "from", "gas", "gasPrice", "maxFeePerGas",
-## "maxPriorityFeePerGas", "nonce", "chainId", and "value".
+## Contract view/pure calls may also pass "block" or "blockTag".
 func contract_invoke(address: String, method: Variant, params: Array, tx_params: Dictionary):
 	if not _ready:
 		return Async.failed("not_ready")

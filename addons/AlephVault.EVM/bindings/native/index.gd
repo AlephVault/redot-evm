@@ -29,6 +29,12 @@ func _init():
 ##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null, or
 ##   absent; it is metadata only. Accounts without valid privateKey values are
 ##   ignored because every native account must support local signing.
+## Transaction config dictionaries use the same names in both bindings:
+## "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
+## "maxPriorityFeePerGas", "nonce", "chainId", "chain_id", and "data".
+## Numeric fields accept decimal strings, 0x-prefixed hex quantities, or JSON
+## integers; use strings for large values. Contract view calls may also pass
+## "block" or "blockTag".
 func initialize(callback: Callable):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")

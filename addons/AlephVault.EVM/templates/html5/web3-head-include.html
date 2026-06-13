@@ -80,6 +80,19 @@ access it as window.web3.
 		return String(address || "").toLowerCase();
 	}
 
+	function normalizeTxConfig(txConfig) {
+		const tx = Object.assign({}, txConfig || {});
+		if (tx.gas === undefined && tx.gasLimit !== undefined) {
+			tx.gas = tx.gasLimit;
+		}
+		if (tx.chainId === undefined && tx.chain_id !== undefined) {
+			tx.chainId = tx.chain_id;
+		}
+		delete tx.gasLimit;
+		delete tx.chain_id;
+		return tx;
+	}
+
 	function isNonZeroAddress(address) {
 		if (!hasWeb3() || !window.web3.utils.isAddress(address)) {
 			return false;
@@ -497,7 +510,7 @@ access it as window.web3.
 					return reject("invalid_amount");
 				}
 
-				const tx = Object.assign({}, txConfig || {}, { to: address, value: amount });
+				const tx = Object.assign(normalizeTxConfig(txConfig), { to: address, value: amount });
 				return sendAndResolveHash(window.web3.eth.sendTransaction(tx));
 			} catch (error) {
 				return reject(error);
@@ -552,10 +565,10 @@ access it as window.web3.
 				const runner = methodRunner(entry.contract, entry.abi, method, params || []);
 				const state = runner.entry.stateMutability || "nonpayable";
 				if (state === "view" || state === "pure" || runner.entry.constant) {
-					return runner.method.call(txParams || {});
+					return runner.method.call(normalizeTxConfig(txParams));
 				}
 
-				return sendAndResolveHash(runner.method.send(txParams || {}));
+				return sendAndResolveHash(runner.method.send(normalizeTxConfig(txParams)));
 			} catch (error) {
 				return reject(error);
 			}

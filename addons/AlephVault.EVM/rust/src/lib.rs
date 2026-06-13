@@ -468,12 +468,12 @@ impl AlephVaultEvmNativeWallet {
             function.state_mutability,
             StateMutability::View | StateMutability::Pure
         ) {
-            let call = merge_tx_json(
+            let call = normalize_tx_json(merge_tx_json(
                 &tx_params,
                 &address,
                 &format!("0x{}", hex::encode(data)),
                 None,
-            );
+            ));
             let block = tx_params
                 .get("block")
                 .or_else(|| tx_params.get("blockTag"))
@@ -797,7 +797,11 @@ impl AlephVaultEvmNativeWallet {
         {
             Some(value) => value,
             None => {
-                let estimate = rpc_request(&self.rpc_url, "eth_estimateGas", json!([tx]))?;
+                let estimate = rpc_request(
+                    &self.rpc_url,
+                    "eth_estimateGas",
+                    json!([normalize_tx_json(tx.clone())]),
+                )?;
                 value_to_u64(&estimate).ok_or_else(|| json_rpc_error(-32000, "invalid gas"))?
             }
         };
@@ -1052,6 +1056,27 @@ fn merge_tx_json(tx_params: &Value, to: &str, data: &str, value: Option<&str>) -
     if let Some(value) = value {
         tx.insert("value".to_owned(), Value::String(value.to_owned()));
     }
+    Value::Object(tx)
+}
+
+// Rationale: Godot callers may use compatibility aliases, but JSON-RPC calls
+// should receive canonical transaction field names.
+fn normalize_tx_json(tx: Value) -> Value {
+    let Value::Object(mut tx) = tx else {
+        return tx;
+    };
+    if !tx.contains_key("gas") {
+        if let Some(value) = tx.get("gasLimit").cloned() {
+            tx.insert("gas".to_owned(), value);
+        }
+    }
+    if !tx.contains_key("chainId") {
+        if let Some(value) = tx.get("chain_id").cloned() {
+            tx.insert("chainId".to_owned(), value);
+        }
+    }
+    tx.remove("gasLimit");
+    tx.remove("chain_id");
     Value::Object(tx)
 }
 
