@@ -230,7 +230,10 @@ func _init():
 #
 # ABI encoding arguments are an array where each element can be:
 #    - A non-dictionary value to encode. The binding resolves the
-#      ABI type for this value.
+#      ABI type for this value. Boolean values infer as bool, numbers as
+#      uint256, strings starting with 0x as bytes, other strings as string,
+#      and byte integer arrays as bytes. Solidity arrays require an explicit
+#      array type.
 #    - A dictionary in the form {"type": String, "value": Variant}.
 #      The type must be a valid EVM type, such as "string" or
 #      "uint256", and value must be valid for that type.
@@ -543,7 +546,9 @@ func get_abi(key: String):
 ## Encodes an ABI argument list using standard ABI encoding.
 ##
 ## Each argument can be a plain value, or a dictionary in the form
-## {"type": String, "value": Variant} to force a specific EVM type.
+## {"type": String, "value": Variant} to force a specific EVM type. Plain
+## byte integer arrays infer as bytes; Solidity arrays require an explicit
+## array type.
 func abi_encode(args: Array):
 	return _binding.abi_encode(args)
 

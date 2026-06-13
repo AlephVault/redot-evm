@@ -156,18 +156,38 @@ access it as window.web3.
 		if (typeof value === "string") {
 			return /^0x[0-9a-fA-F]*$/.test(value) ? "bytes" : "string";
 		}
-		if (Array.isArray(value)) {
+		if (isByteArray(value)) {
 			return "bytes";
 		}
 		return null;
 	}
 
+	function isByteArray(value) {
+		return Array.isArray(value) && value.every(function (item) {
+			return Number.isInteger(item) && item >= 0 && item <= 255;
+		});
+	}
+
+	function byteArrayToHex(value) {
+		return "0x" + value.map(function (item) {
+			return Number(item).toString(16).padStart(2, "0");
+		}).join("");
+	}
+
+	function normalizeAbiValue(type, value) {
+		if ((type === "bytes" || /^bytes([1-9]|[12][0-9]|3[0-2])$/.test(type)) && isByteArray(value)) {
+			return byteArrayToHex(value);
+		}
+		return value;
+	}
+
 	function normalizeAbiArg(arg) {
 		if (arg && typeof arg === "object" && !Array.isArray(arg) && Object.prototype.hasOwnProperty.call(arg, "type") && Object.prototype.hasOwnProperty.call(arg, "value")) {
-			return { type: arg.type, value: arg.value };
+			return { type: arg.type, value: normalizeAbiValue(arg.type, arg.value) };
 		}
 
-		return { type: inferType(arg), value: arg };
+		const type = inferType(arg);
+		return { type: type, value: normalizeAbiValue(type, arg) };
 	}
 
 	function abiTypesAndValues(args) {
@@ -200,12 +220,39 @@ access it as window.web3.
 		});
 	}
 
+	function normalizeDecodedValue(type, value) {
+		const typeName = typeof type === "string" ? type : (type && type.type);
+		const components = type && typeof type === "object" ? (type.components || []) : [];
+		const arrayMatch = typeof typeName === "string" ? typeName.match(/^(.*)\[[0-9]*\]$/) : null;
+		const arrayElementType = arrayMatch ? (components.length > 0 ? { type: arrayMatch[1], components: components } : arrayMatch[1]) : null;
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			const length = Number(value.__length__ || 0);
+			if (length > 0) {
+				const result = [];
+				for (let i = 0; i < length; i++) {
+					result.push(normalizeDecodedValue(arrayElementType || components[i] || null, value[i]));
+				}
+				return result;
+			}
+		}
+		if (typeName === "address" && window.web3.utils.isAddress(value)) {
+			return window.web3.utils.toChecksumAddress(value);
+		}
+		if (typeof typeName === "string" && /^u?int([0-9]{0,3})$/.test(typeName)) {
+			return String(value);
+		}
+		if (Array.isArray(value)) {
+			return value.map(function (item) { return normalizeDecodedValue(arrayElementType, item); });
+		}
+		return value;
+	}
+
 	function decodeParameters(types, encoded) {
 		const decoded = window.web3.eth.abi.decodeParameters(types, encoded);
 		const length = Number(decoded.__length__ || types.length || 0);
 		const values = [];
 		for (let i = 0; i < length; i++) {
-			values.push(decoded[i]);
+			values.push(normalizeDecodedValue(types[i], decoded[i]));
 		}
 		return values;
 	}
@@ -309,6 +356,21 @@ access it as window.web3.
 		}
 	}
 
+	function normalizeContractResult(outputs, value) {
+		const outputList = outputs || [];
+		if (outputList.length === 0) {
+			return null;
+		}
+		if (outputList.length === 1) {
+			return normalizeDecodedValue(outputList[0], value);
+		}
+		const values = [];
+		for (let i = 0; i < outputList.length; i++) {
+			values.push(normalizeDecodedValue(outputList[i], value[i]));
+		}
+		return values;
+	}
+
 	function sendAndResolveHash(promiEvent) {
 		return new Promise(function (resolve, rejectSend) {
 			promiEvent.once("transactionHash", resolve);
@@ -327,7 +389,8 @@ access it as window.web3.
 			const decoded = window.web3.eth.abi.decodeLog(entry.inputs || [], log.data, (log.topics || []).slice(1));
 			const args = {};
 			(entry.inputs || []).forEach(function (input, index) {
-				args[input.name || String(index)] = decoded[input.name] !== undefined ? decoded[input.name] : decoded[index];
+				const value = decoded[input.name] !== undefined ? decoded[input.name] : decoded[index];
+				args[input.name || String(index)] = normalizeDecodedValue(input, value);
 			});
 			return { rawLog: log, name: entry.name, args: args };
 		} catch (_error) {
@@ -565,7 +628,9 @@ access it as window.web3.
 				const runner = methodRunner(entry.contract, entry.abi, method, params || []);
 				const state = runner.entry.stateMutability || "nonpayable";
 				if (state === "view" || state === "pure" || runner.entry.constant) {
-					return runner.method.call(normalizeTxConfig(txParams));
+					return runner.method.call(normalizeTxConfig(txParams)).then(function (value) {
+						return normalizeContractResult(runner.entry.outputs || [], value);
+					});
 				}
 
 				return sendAndResolveHash(runner.method.send(normalizeTxConfig(txParams)));

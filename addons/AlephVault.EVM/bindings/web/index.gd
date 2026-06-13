@@ -169,6 +169,8 @@ func get_abi(key: String):
 ## ABI-encodes arguments using standard Solidity ABI encoding.
 ##
 ## Each element can be a plain value or {"type": String, "value": Variant}.
+## Plain byte integer arrays infer as bytes; Solidity arrays require an
+## explicit array type.
 func abi_encode(args: Array):
 	return _bytes_response(_eval_response("window.alephVaultEvmWeb3.abiEncode(%s)" % _json(args)))
 

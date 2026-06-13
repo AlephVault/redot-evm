@@ -1,6 +1,6 @@
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope, TxLegacy};
 use alloy_dyn_abi::{
-    eip712::TypedData, DynSolType, DynSolValue, EventExt, FunctionExt, JsonAbiExt,
+    eip712::TypedData, DynSolType, DynSolValue, EventExt, FunctionExt, JsonAbiExt, Specifier,
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_eips::eip2930::AccessList;
@@ -1111,8 +1111,7 @@ fn abi_spec_item_to_type(spec: &Value) -> Option<DynSolType> {
     if let Some(type_name) = spec.as_str() {
         return parse_param_type(type_name);
     }
-    let object = spec.as_object()?;
-    parse_param_type(object.get("type")?.as_str()?)
+    serde_json::from_value::<Param>(spec.clone()).ok()?.resolve().ok()
 }
 
 // Rationale: Alloy's ABI reader is the source of truth for Solidity type
@@ -1131,7 +1130,7 @@ fn values_to_param_tokens(values: &Value, params: &[Param]) -> Option<Vec<DynSol
     values
         .iter()
         .zip(params)
-        .map(|(value, param)| value_to_token(value, &parse_param_type(&param.ty)?))
+        .map(|(value, param)| value_to_token(value, &param.resolve().ok()?))
         .collect()
 }
 
@@ -1207,13 +1206,19 @@ fn infer_token(value: &Value) -> Option<DynSolValue> {
         Value::Number(value) => value
             .as_u64()
             .map(|value| DynSolValue::Uint(U256::from(value), 256)),
-        Value::Array(values) => values
-            .iter()
-            .map(infer_token)
-            .collect::<Option<Vec<_>>>()
-            .map(DynSolValue::Array),
+        Value::Array(values) => json_array_to_bytes(values).map(DynSolValue::Bytes),
         _ => None,
     }
+}
+
+// Rationale: JSON.stringify(PackedByteArray) reaches bindings as an array of
+// byte integers, so implicit array ABI args are treated as bytes in both web
+// and native. Solidity arrays should be passed with an explicit array type.
+fn json_array_to_bytes(values: &[Value]) -> Option<Vec<u8>> {
+    values
+        .iter()
+        .map(|value| value.as_u64().and_then(|value| u8::try_from(value).ok()))
+        .collect()
 }
 
 // Rationale: decoded ABI values must cross the Godot boundary as JSON-friendly
@@ -1305,7 +1310,7 @@ fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
         }
         for input in event.inputs.iter().filter(|input| input.indexed) {
             if let Some(value) = object.get(&input.name) {
-                let kind = parse_param_type(&input.ty)?;
+                let kind = input.resolve().ok()?;
                 let token = value_to_token(value, &kind)?;
                 let encoded = DynSolValue::Tuple(vec![token]).abi_encode_sequence()?;
                 let topic = if kind.is_dynamic() {
