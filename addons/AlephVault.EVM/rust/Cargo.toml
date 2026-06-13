@@ -7,9 +7,13 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-ethers-core = "2"
-ethers-signers = "2"
-futures = "0.3"
+alloy-consensus = "2"
+alloy-dyn-abi = "1"
+alloy-eips = "2"
+alloy-json-abi = "1"
+alloy-primitives = "1"
+alloy-signer = { version = "2", features = ["eip712"] }
+alloy-signer-local = "2"
 godot = "0.2"
 hex = "0.4"
 num-bigint = "0.4"

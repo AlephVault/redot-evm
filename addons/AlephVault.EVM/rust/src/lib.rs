@@ -1,12 +1,13 @@
-use ethers_core::abi::{
-    encode, Abi, Event, Function, Param, ParamType, RawLog, StateMutability, Token,
+use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope, TxLegacy};
+use alloy_dyn_abi::{
+    eip712::TypedData, DynSolType, DynSolValue, EventExt, FunctionExt, JsonAbiExt,
 };
-use ethers_core::types::transaction::eip2718::TypedTransaction;
-use ethers_core::types::transaction::eip712::TypedData;
-use ethers_core::types::{transaction::eip1559::Eip1559TransactionRequest, Address, Bytes, H256};
-use ethers_core::types::{NameOrAddress, TransactionRequest, U256, U64};
-use ethers_signers::{LocalWallet, Signer};
-use futures::executor::block_on;
+use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::eip2930::AccessList;
+use alloy_json_abi::{Event, Function, JsonAbi, Param, StateMutability};
+use alloy_primitives::{Address, Bytes, TxKind, B256, I256, U256};
+use alloy_signer::{Signer, SignerSync};
+use alloy_signer_local::PrivateKeySigner;
 use godot::builtin::{Array, Dictionary, GString, PackedByteArray, Variant};
 use godot::classes::{IRefCounted, RefCounted};
 use godot::prelude::*;
@@ -25,9 +26,40 @@ struct AlephVaultEvmNativeWallet {
     chain_id: i64,
     rpc_url: String,
     accounts: Vec<String>,
-    wallets: HashMap<Address, LocalWallet>,
+    wallets: HashMap<Address, PrivateKeySigner>,
     abis: HashMap<String, String>,
     contracts: HashMap<String, String>,
+}
+
+enum PreparedTx {
+    Legacy(TxLegacy),
+    Eip1559(TxEip1559),
+}
+
+impl PreparedTx {
+    fn signature_hash(&self) -> B256 {
+        match self {
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+        }
+    }
+
+    fn into_signed_bytes(self, signature: alloy_primitives::Signature) -> Vec<u8> {
+        match self {
+            Self::Legacy(tx) => {
+                let signed = tx.into_signed(signature);
+                let mut out = Vec::with_capacity(signed.network_encoded_length());
+                signed.network_encode(&mut out);
+                out
+            }
+            Self::Eip1559(tx) => {
+                let envelope = TxEnvelope::Eip1559(tx.into_signed(signature));
+                let mut out = Vec::with_capacity(envelope.encode_2718_len());
+                envelope.encode_2718(&mut out);
+                out
+            }
+        }
+    }
 }
 
 #[godot_api]
@@ -324,7 +356,7 @@ impl AlephVaultEvmNativeWallet {
     // validates key syntax and returns the derived checksum address for preview
     // or import flows without mutating wallet state.
     fn validate_private_key(&self, private_key: GString) -> Dictionary {
-        match LocalWallet::from_str(&private_key.to_string()) {
+        match PrivateKeySigner::from_str(&private_key.to_string()) {
             Ok(wallet) => success(json!(format_address(wallet.address()))),
             Err(_) => failed("invalid_value"),
         }
@@ -340,7 +372,10 @@ impl AlephVaultEvmNativeWallet {
         let Some(tokens) = abi_args_to_tokens(&args) else {
             return failed("invalid_args");
         };
-        success_bytes(encode(&tokens))
+        match DynSolValue::Tuple(tokens).abi_encode_sequence() {
+            Some(bytes) => success_bytes(bytes),
+            None => failed("invalid_args"),
+        }
     }
 
     #[func]
@@ -353,10 +388,11 @@ impl AlephVaultEvmNativeWallet {
         let Some(tokens) = abi_args_to_tokens(&args) else {
             return failed("invalid_args");
         };
-        match ethers_core::abi::encode_packed(&tokens) {
-            Ok(bytes) => success_bytes(bytes),
-            Err(_) => failed("invalid_value"),
+        let mut bytes = Vec::new();
+        for token in tokens {
+            bytes.extend(token.abi_encode_packed());
         }
+        success_bytes(bytes)
     }
 
     #[func]
@@ -369,10 +405,12 @@ impl AlephVaultEvmNativeWallet {
         let Some(types) = abi_spec_to_types(&spec) else {
             return failed("invalid_spec");
         };
-        match ethers_core::abi::decode(&types, &bytes.to_vec()) {
-            Ok(tokens) => success(Value::Array(
+        let tuple_type = DynSolType::Tuple(types);
+        match tuple_type.abi_decode_sequence(&bytes.to_vec()) {
+            Ok(DynSolValue::Tuple(tokens)) => success(Value::Array(
                 tokens.into_iter().map(token_to_json).collect(),
             )),
+            Ok(_) => failed("invalid_value"),
             Err(_) => failed("invalid_value"),
         }
     }
@@ -422,7 +460,7 @@ impl AlephVaultEvmNativeWallet {
         let Some(tokens) = values_to_param_tokens(&params, &function.inputs) else {
             return failed("invalid_params");
         };
-        let Ok(data) = function.encode_input(&tokens) else {
+        let Ok(data) = function.abi_encode_input(&tokens) else {
             return failed("invalid_params");
         };
 
@@ -447,7 +485,7 @@ impl AlephVaultEvmNativeWallet {
                     let Some(bytes) = decode_hex_bytes(&hex_result) else {
                         return failed("invalid_response");
                     };
-                    match function.decode_output(&bytes) {
+                    match function.abi_decode_output(&bytes) {
                         Ok(tokens) => {
                             let values: Vec<Value> =
                                 tokens.into_iter().map(token_to_json).collect();
@@ -585,15 +623,15 @@ impl AlephVaultEvmNativeWallet {
         let Some(bytes) = value_to_bytes(&values[1]) else {
             return Err(json_rpc_error(-32602, "invalid message"));
         };
-        let hash = H256::from_slice(&keccak_bytes(&bytes));
+        let hash = B256::from(keccak_bytes(&bytes));
         let signature = wallet
-            .sign_hash(hash)
+            .sign_hash_sync(&hash)
             .map_err(|error| json_rpc_error(-32000, &error.to_string()))?;
         Ok(json!(signature.to_string()))
     }
 
     // Rationale: personal_sign applies the standard Ethereum message prefix
-    // through ethers_signers, matching browser-wallet behavior.
+    // through Alloy's signer trait, matching browser-wallet behavior.
     fn handle_personal_sign(&self, params: &Value) -> Result<Value, Value> {
         let Some(values) = params.as_array() else {
             return Err(json_rpc_error(-32602, "invalid params"));
@@ -612,7 +650,8 @@ impl AlephVaultEvmNativeWallet {
         let Some(bytes) = value_to_bytes(message_value) else {
             return Err(json_rpc_error(-32602, "invalid message"));
         };
-        let signature = block_on(wallet.sign_message(bytes))
+        let signature = wallet
+            .sign_message_sync(&bytes)
             .map_err(|error| json_rpc_error(-32000, &error.to_string()))?;
         Ok(json!(signature.to_string()))
     }
@@ -637,7 +676,8 @@ impl AlephVaultEvmNativeWallet {
         };
         let typed_data: TypedData = serde_json::from_value(typed_value)
             .map_err(|_| json_rpc_error(-32602, "invalid typed data"))?;
-        let signature = block_on(wallet.sign_typed_data(&typed_data))
+        let signature = wallet
+            .sign_dynamic_typed_data_sync(&typed_data)
             .map_err(|error| json_rpc_error(-32000, &error.to_string()))?;
         Ok(json!(signature.to_string()))
     }
@@ -680,14 +720,14 @@ impl AlephVaultEvmNativeWallet {
 
     // Rationale: signing methods identify the signer by address, so this maps
     // JSON-RPC address arguments to cached local wallets.
-    fn wallet_for_value(&self, value: &Value) -> Option<LocalWallet> {
+    fn wallet_for_value(&self, value: &Value) -> Option<PrivateKeySigner> {
         let address = value.as_str().and_then(parse_address)?;
         self.wallets.get(&address).cloned()
     }
 
     // Rationale: transaction requests may omit "from"; in that case native
     // mirrors common wallet behavior by using the first configured account.
-    fn wallet_for_tx(&self, tx: &Value) -> Option<LocalWallet> {
+    fn wallet_for_tx(&self, tx: &Value) -> Option<PrivateKeySigner> {
         tx.get("from")
             .and_then(|value| self.wallet_for_value(value))
             .or_else(|| self.wallets.values().next().cloned())
@@ -704,11 +744,12 @@ impl AlephVaultEvmNativeWallet {
         let wallet = self
             .wallet_for_tx(tx)
             .ok_or_else(|| json_rpc_error(4100, "unknown account"))?
-            .with_chain_id(chain_id as u64);
+            .with_chain_id(Some(chain_id as u64));
         let typed = self.prepare_transaction(tx, wallet.address())?;
-        let signature = block_on(wallet.sign_transaction(&typed))
+        let signature = wallet
+            .sign_hash_sync(&typed.signature_hash())
             .map_err(|error| json_rpc_error(-32000, &error.to_string()))?;
-        let raw = typed.rlp_signed(&signature);
+        let raw = typed.into_signed_bytes(signature);
         Ok(json!(format!("0x{}", hex::encode(raw))))
     }
 
@@ -726,9 +767,9 @@ impl AlephVaultEvmNativeWallet {
         }
     }
 
-    // Rationale: this normalizes JSON-RPC tx config into ethers typed
+    // Rationale: this normalizes JSON-RPC tx config into Alloy typed
     // transactions, filling nonce/gas/fees from RPC only when omitted.
-    fn prepare_transaction(&self, tx: &Value, signer: Address) -> Result<TypedTransaction, Value> {
+    fn prepare_transaction(&self, tx: &Value, signer: Address) -> Result<PreparedTx, Value> {
         let Some(to) = tx.get("to").and_then(Value::as_str).and_then(parse_address) else {
             return Err(json_rpc_error(-32602, "missing to"));
         };
@@ -738,7 +779,7 @@ impl AlephVaultEvmNativeWallet {
             .and_then(decode_hex_bytes)
             .unwrap_or_default();
         let value = tx.get("value").and_then(value_to_u256).unwrap_or_default();
-        let nonce = match tx.get("nonce").and_then(value_to_u256) {
+        let nonce = match tx.get("nonce").and_then(value_to_u64) {
             Some(value) => value,
             None => {
                 let nonce = rpc_request(
@@ -746,88 +787,86 @@ impl AlephVaultEvmNativeWallet {
                     "eth_getTransactionCount",
                     json!([format_address(signer), "pending"]),
                 )?;
-                value_to_u256(&nonce).ok_or_else(|| json_rpc_error(-32000, "invalid nonce"))?
+                value_to_u64(&nonce).ok_or_else(|| json_rpc_error(-32000, "invalid nonce"))?
             }
         };
         let gas = match tx
             .get("gas")
             .or_else(|| tx.get("gasLimit"))
-            .and_then(value_to_u256)
+            .and_then(value_to_u64)
         {
             Some(value) => value,
             None => {
                 let estimate = rpc_request(&self.rpc_url, "eth_estimateGas", json!([tx]))?;
-                value_to_u256(&estimate).ok_or_else(|| json_rpc_error(-32000, "invalid gas"))?
+                value_to_u64(&estimate).ok_or_else(|| json_rpc_error(-32000, "invalid gas"))?
             }
         };
         if tx.get("maxFeePerGas").is_some() || tx.get("maxPriorityFeePerGas").is_some() {
             let max_fee_per_gas = tx
                 .get("maxFeePerGas")
-                .and_then(value_to_u256)
+                .and_then(value_to_u128)
                 .ok_or_else(|| json_rpc_error(-32602, "missing maxFeePerGas"))?;
             let max_priority_fee_per_gas =
-                match tx.get("maxPriorityFeePerGas").and_then(value_to_u256) {
+                match tx.get("maxPriorityFeePerGas").and_then(value_to_u128) {
                     Some(value) => value,
                     None => rpc_request(&self.rpc_url, "eth_maxPriorityFeePerGas", json!([]))
                         .ok()
-                        .and_then(|value| value_to_u256(&value))
+                        .and_then(|value| value_to_u128(&value))
                         .unwrap_or_default(),
                 };
-            let mut request = Eip1559TransactionRequest::new()
-                .from(signer)
-                .to(NameOrAddress::Address(to))
-                .value(value)
-                .data(Bytes::from(data))
-                .nonce(nonce)
-                .gas(gas)
-                .max_fee_per_gas(max_fee_per_gas)
-                .max_priority_fee_per_gas(max_priority_fee_per_gas);
-            request.chain_id = Some(U64::from(
-                tx.get("chainId")
+            Ok(PreparedTx::Eip1559(TxEip1559 {
+                chain_id: tx
+                    .get("chainId")
                     .or_else(|| tx.get("chain_id"))
                     .and_then(chain_id_value_to_i64)
                     .unwrap_or(self.chain_id) as u64,
-            ));
-            Ok(TypedTransaction::Eip1559(request))
+                nonce,
+                gas_limit: gas,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to: TxKind::Call(to),
+                value,
+                access_list: AccessList::default(),
+                input: Bytes::from(data),
+            }))
         } else {
-            let gas_price = match tx.get("gasPrice").and_then(value_to_u256) {
+            let gas_price = match tx.get("gasPrice").and_then(value_to_u128) {
                 Some(value) => value,
                 None => {
                     let gas_price = rpc_request(&self.rpc_url, "eth_gasPrice", json!([]))?;
-                    value_to_u256(&gas_price)
+                    value_to_u128(&gas_price)
                         .ok_or_else(|| json_rpc_error(-32000, "invalid gas price"))?
                 }
             };
-            let request = TransactionRequest::new()
-                .from(signer)
-                .to(NameOrAddress::Address(to))
-                .value(value)
-                .data(Bytes::from(data))
-                .nonce(nonce)
-                .gas(gas)
-                .gas_price(gas_price)
-                .chain_id(
+            Ok(PreparedTx::Legacy(TxLegacy {
+                chain_id: Some(
                     tx.get("chainId")
                         .or_else(|| tx.get("chain_id"))
                         .and_then(chain_id_value_to_i64)
                         .unwrap_or(self.chain_id) as u64,
-                );
-            Ok(TypedTransaction::Legacy(request))
+                ),
+                nonce,
+                gas_price,
+                gas_limit: gas,
+                to: TxKind::Call(to),
+                value,
+                input: Bytes::from(data),
+            }))
         }
     }
 
     // Rationale: registered contracts are keyed by normalized address, while
     // ABI JSON is keyed separately to allow reuse across many contracts.
-    fn contract_abi(&self, address: &str) -> Option<Abi> {
+    fn contract_abi(&self, address: &str) -> Option<JsonAbi> {
         let key = self.contracts.get(&checksum_or_lower(address))?;
         let abi_json = self.abis.get(key)?;
-        serde_json::from_str::<Abi>(abi_json).ok()
+        serde_json::from_str::<JsonAbi>(abi_json).ok()
     }
 }
 
 // Rationale: initialization expects account objects with privateKey and
 // optional name metadata; only valid keys become exposed/signing accounts.
-fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, LocalWallet>) {
+fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, PrivateKeySigner>) {
     let mut wallets = HashMap::new();
     let mut accounts = Vec::new();
 
@@ -838,7 +877,7 @@ fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, LocalWalle
                 .and_then(|account| account.get("privateKey"))
                 .and_then(Value::as_str)
             {
-                if let Ok(wallet) = LocalWallet::from_str(key) {
+                if let Ok(wallet) = PrivateKeySigner::from_str(key) {
                     let address = format_address(wallet.address());
                     if !accounts.iter().any(|known| known == &address) {
                         accounts.push(address);
@@ -895,7 +934,7 @@ fn parse_address(address: &str) -> Option<Address> {
 // Rationale: public account/address output should be stable and EIP-55
 // checksummed across native and web bindings.
 fn format_address(address: Address) -> String {
-    checksum_address(&hex::encode(address.as_bytes()))
+    checksum_address(&hex::encode(address.as_slice()))
 }
 
 // Rationale: contract cache lookups need a normalized key even if callers pass
@@ -947,14 +986,43 @@ fn chain_id_value_to_i64(value: &Value) -> Option<i64> {
 }
 
 // Rationale: tx and ABI numeric fields can arrive as JSON numbers, decimal
-// strings, or RPC hex quantities, but ethers needs U256.
+// strings, or RPC hex quantities, but Alloy needs U256 for EVM word values.
 fn value_to_u256(value: &Value) -> Option<U256> {
     match value {
         Value::String(value) if value.starts_with("0x") => {
             U256::from_str_radix(&value[2..], 16).ok()
         }
-        Value::String(value) => U256::from_dec_str(value).ok(),
+        Value::String(value) => U256::from_str_radix(value, 10).ok(),
         Value::Number(value) => value.as_u64().map(U256::from),
+        _ => None,
+    }
+}
+
+// Rationale: nonce and gas limit fields are consensus-bounded u64 values, so
+// conversion must reject values that do not fit instead of truncating them.
+fn value_to_u64(value: &Value) -> Option<u64> {
+    let value = value_to_u256(value)?;
+    value.try_into().ok()
+}
+
+// Rationale: fee fields are represented by Alloy consensus structs as u128,
+// so conversion must be explicit and checked at the JSON boundary.
+fn value_to_u128(value: &Value) -> Option<u128> {
+    let value = value_to_u256(value)?;
+    value.try_into().ok()
+}
+
+// Rationale: ABI signed integer inputs accept the same decimal/hex/number
+// shapes as unsigned values while preserving sign for int<M> types.
+fn value_to_i256(value: &Value) -> Option<I256> {
+    match value {
+        Value::String(value) if value.starts_with("0x") => U256::from_str_radix(&value[2..], 16)
+            .ok()
+            .map(I256::from_raw),
+        Value::String(value) => I256::from_dec_str(value).ok(),
+        Value::Number(value) => value
+            .as_i64()
+            .and_then(|value| I256::from_dec_str(&value.to_string()).ok()),
         _ => None,
     }
 }
@@ -989,7 +1057,7 @@ fn merge_tx_json(tx_params: &Value, to: &str, data: &str, value: Option<&str>) -
 
 // Rationale: free-form ABI helpers accept either explicit {type,value} entries
 // or inferred plain values, matching the web helper contract.
-fn abi_args_to_tokens(args: &Value) -> Option<Vec<Token>> {
+fn abi_args_to_tokens(args: &Value) -> Option<Vec<DynSolValue>> {
     let args = args.as_array()?;
     let mut tokens = Vec::new();
     for arg in args {
@@ -1005,16 +1073,16 @@ fn abi_args_to_tokens(args: &Value) -> Option<Vec<Token>> {
     Some(tokens)
 }
 
-// Rationale: ABI decoding takes only type specs, so this extracts ethers
-// ParamType values from strings or ABI-like dictionaries.
-fn abi_spec_to_types(spec: &Value) -> Option<Vec<ParamType>> {
+// Rationale: ABI decoding takes only type specs, so this extracts Alloy
+// DynSolType values from strings or ABI-like dictionaries.
+fn abi_spec_to_types(spec: &Value) -> Option<Vec<DynSolType>> {
     let spec = spec.as_array()?;
     spec.iter().map(abi_spec_item_to_type).collect()
 }
 
 // Rationale: each decode spec item supports the same string-or-dictionary
 // shapes documented for the Godot facade.
-fn abi_spec_item_to_type(spec: &Value) -> Option<ParamType> {
+fn abi_spec_item_to_type(spec: &Value) -> Option<DynSolType> {
     if let Some(type_name) = spec.as_str() {
         return parse_param_type(type_name);
     }
@@ -1022,15 +1090,15 @@ fn abi_spec_item_to_type(spec: &Value) -> Option<ParamType> {
     parse_param_type(object.get("type")?.as_str()?)
 }
 
-// Rationale: ethers' ABI reader is the source of truth for Solidity type
+// Rationale: Alloy's ABI reader is the source of truth for Solidity type
 // syntax instead of maintaining a partial parser.
-fn parse_param_type(type_name: &str) -> Option<ParamType> {
-    ethers_core::abi::param_type::Reader::read(type_name).ok()
+fn parse_param_type(type_name: &str) -> Option<DynSolType> {
+    DynSolType::parse(type_name).ok()
 }
 
 // Rationale: contract calls already know ABI input types, so values should be
 // encoded against those exact types rather than inferred.
-fn values_to_param_tokens(values: &Value, params: &[Param]) -> Option<Vec<Token>> {
+fn values_to_param_tokens(values: &Value, params: &[Param]) -> Option<Vec<DynSolValue>> {
     let values = values.as_array()?;
     if values.len() != params.len() {
         return None;
@@ -1038,37 +1106,41 @@ fn values_to_param_tokens(values: &Value, params: &[Param]) -> Option<Vec<Token>
     values
         .iter()
         .zip(params)
-        .map(|(value, param)| value_to_token(value, &param.kind))
+        .map(|(value, param)| value_to_token(value, &parse_param_type(&param.ty)?))
         .collect()
 }
 
 // Rationale: this is the typed conversion boundary from Godot/JSON values into
-// ethers ABI tokens for contract calls and explicit ABI encoding.
-fn value_to_token(value: &Value, kind: &ParamType) -> Option<Token> {
+// Alloy ABI values for contract calls and explicit ABI encoding.
+fn value_to_token(value: &Value, kind: &DynSolType) -> Option<DynSolValue> {
     match kind {
-        ParamType::Address => Some(Token::Address(value.as_str().and_then(parse_address)?)),
-        ParamType::Bytes => Some(Token::Bytes(value_to_bytes(value)?)),
-        ParamType::FixedBytes(size) => {
+        DynSolType::Address => Some(DynSolValue::Address(
+            value.as_str().and_then(parse_address)?,
+        )),
+        DynSolType::Bytes => Some(DynSolValue::Bytes(value_to_bytes(value)?)),
+        DynSolType::FixedBytes(size) => {
             let bytes = value_to_bytes(value)?;
             if bytes.len() == *size {
-                Some(Token::FixedBytes(bytes))
+                let mut word = [0u8; 32];
+                word[..bytes.len()].copy_from_slice(&bytes);
+                Some(DynSolValue::FixedBytes(B256::from(word), *size))
             } else {
                 None
             }
         }
-        ParamType::Int(_) => Some(Token::Int(value_to_u256(value)?)),
-        ParamType::Uint(_) => Some(Token::Uint(value_to_u256(value)?)),
-        ParamType::Bool => Some(Token::Bool(value.as_bool()?)),
-        ParamType::String => Some(Token::String(value.as_str()?.to_owned())),
-        ParamType::Array(inner) => {
+        DynSolType::Int(size) => Some(DynSolValue::Int(value_to_i256(value)?, *size)),
+        DynSolType::Uint(size) => Some(DynSolValue::Uint(value_to_u256(value)?, *size)),
+        DynSolType::Bool => Some(DynSolValue::Bool(value.as_bool()?)),
+        DynSolType::String => Some(DynSolValue::String(value.as_str()?.to_owned())),
+        DynSolType::Array(inner) => {
             let values = value.as_array()?;
             values
                 .iter()
                 .map(|value| value_to_token(value, inner))
                 .collect::<Option<Vec<_>>>()
-                .map(Token::Array)
+                .map(DynSolValue::Array)
         }
-        ParamType::FixedArray(inner, size) => {
+        DynSolType::FixedArray(inner, size) => {
             let values = value.as_array()?;
             if values.len() != *size {
                 return None;
@@ -1077,9 +1149,9 @@ fn value_to_token(value: &Value, kind: &ParamType) -> Option<Token> {
                 .iter()
                 .map(|value| value_to_token(value, inner))
                 .collect::<Option<Vec<_>>>()
-                .map(Token::FixedArray)
+                .map(DynSolValue::FixedArray)
         }
-        ParamType::Tuple(types) => {
+        DynSolType::Tuple(types) => {
             let values = value.as_array()?;
             if values.len() != types.len() {
                 return None;
@@ -1089,58 +1161,68 @@ fn value_to_token(value: &Value, kind: &ParamType) -> Option<Token> {
                 .zip(types)
                 .map(|(value, kind)| value_to_token(value, kind))
                 .collect::<Option<Vec<_>>>()
-                .map(Token::Tuple)
+                .map(DynSolValue::Tuple)
         }
+        DynSolType::Function | DynSolType::CustomStruct { .. } => None,
     }
 }
 
 // Rationale: untyped ABI encoding exists for convenience; inference is kept
 // intentionally close to the web helper, where 0x strings infer as bytes.
-fn infer_token(value: &Value) -> Option<Token> {
+fn infer_token(value: &Value) -> Option<DynSolValue> {
     match value {
-        Value::Bool(value) => Some(Token::Bool(*value)),
+        Value::Bool(value) => Some(DynSolValue::Bool(*value)),
         Value::String(value) if value.starts_with("0x") => {
-            decode_hex_bytes(value).map(Token::Bytes)
+            decode_hex_bytes(value).map(DynSolValue::Bytes)
         }
-        Value::String(value) if is_decimal_uint(value) => {
-            U256::from_dec_str(value).ok().map(Token::Uint)
-        }
-        Value::String(value) => Some(Token::String(value.clone())),
-        Value::Number(value) => value.as_u64().map(|value| Token::Uint(U256::from(value))),
+        Value::String(value) if is_decimal_uint(value) => U256::from_str_radix(value, 10)
+            .ok()
+            .map(|value| DynSolValue::Uint(value, 256)),
+        Value::String(value) => Some(DynSolValue::String(value.clone())),
+        Value::Number(value) => value
+            .as_u64()
+            .map(|value| DynSolValue::Uint(U256::from(value), 256)),
         Value::Array(values) => values
             .iter()
             .map(infer_token)
             .collect::<Option<Vec<_>>>()
-            .map(Token::Array),
+            .map(DynSolValue::Array),
         _ => None,
     }
 }
 
 // Rationale: decoded ABI values must cross the Godot boundary as JSON-friendly
 // variants with large integers preserved as strings.
-fn token_to_json(token: Token) -> Value {
+fn token_to_json(token: DynSolValue) -> Value {
     match token {
-        Token::Address(value) => Value::String(format_address(value)),
-        Token::FixedBytes(value) | Token::Bytes(value) => {
-            Value::String(format!("0x{}", hex::encode(value)))
+        DynSolValue::Address(value) => Value::String(format_address(value)),
+        DynSolValue::FixedBytes(value, size) => {
+            Value::String(format!("0x{}", hex::encode(&value.as_slice()[..size])))
         }
-        Token::Int(value) | Token::Uint(value) => u256_to_json(value),
-        Token::Bool(value) => Value::Bool(value),
-        Token::String(value) => Value::String(value),
-        Token::FixedArray(values) | Token::Array(values) | Token::Tuple(values) => {
+        DynSolValue::Bytes(value) => Value::String(format!("0x{}", hex::encode(value))),
+        DynSolValue::Int(value, _) => Value::String(value.to_string()),
+        DynSolValue::Uint(value, _) => u256_to_json(value),
+        DynSolValue::Bool(value) => Value::Bool(value),
+        DynSolValue::String(value) => Value::String(value),
+        DynSolValue::FixedArray(values)
+        | DynSolValue::Array(values)
+        | DynSolValue::Tuple(values) => {
             Value::Array(values.into_iter().map(token_to_json).collect())
+        }
+        DynSolValue::Function(value) => Value::String(format!("0x{}", hex::encode(value))),
+        DynSolValue::CustomStruct { tuple, .. } => {
+            Value::Array(tuple.into_iter().map(token_to_json).collect())
         }
     }
 }
 
 // Rationale: method selectors can be a name or full ABI entry; overloads by
 // name are resolved by arity to match the existing web helper behavior.
-fn resolve_function(abi: &Abi, method: &Value, params: &Value) -> Option<Function> {
+fn resolve_function(abi: &JsonAbi, method: &Value, params: &Value) -> Option<Function> {
     if let Some(name) = method.as_str() {
         let arity = params.as_array().map(Vec::len).unwrap_or_default();
         return abi
-            .functions_by_name(name)
-            .ok()?
+            .function(name)?
             .iter()
             .find(|function| function.inputs.len() == arity)
             .cloned();
@@ -1150,9 +1232,9 @@ fn resolve_function(abi: &Abi, method: &Value, params: &Value) -> Option<Functio
 
 // Rationale: event selectors follow the same name-or-ABI-entry convention as
 // contract methods, with the first named overload matching web behavior.
-fn resolve_event(abi: &Abi, event: &Value) -> Option<Event> {
+fn resolve_event(abi: &JsonAbi, event: &Value) -> Option<Event> {
     if let Some(name) = event.as_str() {
-        return abi.events_by_name(name).ok()?.first().cloned();
+        return abi.event(name)?.first().cloned();
     }
     serde_json::from_value::<Event>(event.clone()).ok()
 }
@@ -1160,7 +1242,11 @@ fn resolve_event(abi: &Abi, event: &Value) -> Option<Event> {
 // Rationale: event topic filtering accepts either raw topic slots or a map of
 // indexed argument names, then produces an eth_getLogs topic array.
 fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
-    let mut output = vec![Value::String(format!("{:#x}", event.signature()))];
+    let mut output = if event.anonymous {
+        Vec::new()
+    } else {
+        vec![Value::String(format!("{:#x}", event.selector()))]
+    };
     if topics.is_null() {
         return Some(output);
     }
@@ -1194,11 +1280,13 @@ fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
         }
         for input in event.inputs.iter().filter(|input| input.indexed) {
             if let Some(value) = object.get(&input.name) {
-                let token = value_to_token(value, &input.kind)?;
-                let topic = if input.kind.is_dynamic() {
-                    format!("0x{}", hex::encode(keccak_bytes(&encode(&[token]))))
+                let kind = parse_param_type(&input.ty)?;
+                let token = value_to_token(value, &kind)?;
+                let encoded = DynSolValue::Tuple(vec![token]).abi_encode_sequence()?;
+                let topic = if kind.is_dynamic() {
+                    format!("0x{}", hex::encode(keccak_bytes(&encoded)))
                 } else {
-                    format!("0x{}", hex::encode(encode(&[token])))
+                    format!("0x{}", hex::encode(encoded))
                 };
                 output.push(Value::String(topic));
             }
@@ -1211,7 +1299,7 @@ fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
 // Rationale: logs are decoded locally so native returns the same {rawLog,name,
 // args} shape as the web helper without needing JavaScript contracts.
 fn decode_event_log(event: &Event, log: &Value) -> Option<Value> {
-    let topics: Vec<H256> = log
+    let topics: Vec<B256> = log
         .get("topics")?
         .as_array()?
         .iter()
@@ -1220,22 +1308,29 @@ fn decode_event_log(event: &Event, log: &Value) -> Option<Value> {
             if bytes.len() != 32 {
                 return None;
             }
-            Some(H256::from_slice(&bytes))
+            Some(B256::from_slice(&bytes))
         })
         .collect::<Option<Vec<_>>>()?;
-    if topics.first().copied()? != event.signature() {
+    if !event.anonymous && topics.first().copied()? != event.selector() {
         return None;
     }
     let data = decode_hex_bytes(log.get("data")?.as_str()?)?;
-    let decoded = event.parse_log(RawLog { topics, data }).ok()?;
+    let decoded = event.decode_log_parts(topics, &data).ok()?;
     let mut args = serde_json::Map::new();
-    for (index, param) in decoded.params.into_iter().enumerate() {
+    let mut indexed_values = decoded.indexed.into_iter();
+    let mut body_values = decoded.body.into_iter();
+    for (index, param) in event.inputs.iter().enumerate() {
         let name = if param.name.is_empty() {
             index.to_string()
         } else {
-            param.name
+            param.name.clone()
         };
-        args.insert(name, token_to_json(param.value));
+        let value = if param.indexed {
+            indexed_values.next()?
+        } else {
+            body_values.next()?
+        };
+        args.insert(name, token_to_json(value));
     }
     Some(json!({
         "name": event.name,
