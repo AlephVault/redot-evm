@@ -31,7 +31,7 @@ struct AlephVaultEvmNativeWallet {
     chain_id: i64,
     rpc_url: String,
     accounts: Vec<String>,
-    wallets: HashMap<Address, PrivateKeySigner>,
+    wallet: Option<PrivateKeySigner>,
     abis: HashMap<String, String>,
     contracts: HashMap<String, String>,
 }
@@ -78,7 +78,7 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
             chain_id: 0,
             rpc_url: String::new(),
             accounts: Vec::new(),
-            wallets: HashMap::new(),
+            wallet: None,
             abis: HashMap::new(),
             contracts: HashMap::new(),
         }
@@ -97,7 +97,7 @@ impl AlephVaultEvmNativeWallet {
         if self.rpc_url.is_empty() || self.chain_id <= 0 {
             return failed("no_valid_chains");
         }
-        if self.wallets.is_empty() {
+        if self.wallet.is_none() {
             return failed("not_unlocked");
         }
 
@@ -334,7 +334,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_create(&mut self, password: GString) -> Dictionary {
-        if !self.wallets.is_empty() {
+        if self.wallet.is_some() {
             return failed("invalid_state");
         }
         let password = password.to_string();
@@ -369,7 +369,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_destroy(&mut self) -> Dictionary {
-        if !self.wallets.is_empty() {
+        if self.wallet.is_some() {
             return failed("invalid_state");
         }
         let keystore_path = keystore_path();
@@ -385,7 +385,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_backup(&self, target_path: GString) -> Dictionary {
-        if !self.wallets.is_empty() {
+        if self.wallet.is_some() {
             return failed("invalid_state");
         }
         let keystore_path = keystore_path();
@@ -400,7 +400,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_restore(&mut self, source_path: GString) -> Dictionary {
-        if !self.wallets.is_empty() {
+        if self.wallet.is_some() {
             return failed("invalid_state");
         }
         let storage_dir = storage_dir();
@@ -424,7 +424,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_unlock(&mut self, password: GString) -> Dictionary {
-        if !self.wallets.is_empty() {
+        if self.wallet.is_some() {
             return failed("invalid_state");
         }
         let keystore_path = keystore_path();
@@ -437,8 +437,7 @@ impl AlephVaultEvmNativeWallet {
             return failed("invalid_password");
         };
         let address = format_address(wallet.address());
-        self.wallets.clear();
-        self.wallets.insert(wallet.address(), wallet);
+        self.wallet = Some(wallet);
         self.accounts = vec![address.clone()];
         self.ready = false;
         success(json!(address))
@@ -446,7 +445,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_lock(&mut self) -> Dictionary {
-        if self.wallets.is_empty() {
+        if self.wallet.is_none() {
             return failed("invalid_state");
         }
         self.clear_ready_state();
@@ -455,7 +454,7 @@ impl AlephVaultEvmNativeWallet {
 
     #[func]
     fn account_set_password(&mut self, password: GString) -> Dictionary {
-        if self.wallets.is_empty() {
+        if self.wallet.is_none() {
             return failed("invalid_state");
         }
         let password = password.to_string();
@@ -467,7 +466,7 @@ impl AlephVaultEvmNativeWallet {
         if !final_path.exists() {
             return failed("invalid_state");
         }
-        let Some(wallet) = self.wallets.values().next().cloned() else {
+        let Some(wallet) = self.wallet.as_ref() else {
             return failed("invalid_state");
         };
         if fs::create_dir_all(&storage_dir).is_err() {
@@ -476,8 +475,12 @@ impl AlephVaultEvmNativeWallet {
         let mut rng = thread_rng();
         let new_name = "account-new.json";
         let new_path = Path::new(&storage_dir).join(new_name);
+        let backup_path = Path::new(&storage_dir).join("account-old.json");
         if new_path.exists() {
             let _ = fs::remove_file(&new_path);
+        }
+        if backup_path.exists() {
+            let _ = fs::remove_file(&backup_path);
         }
         let Ok((_wallet, _uuid)) = PrivateKeySigner::encrypt_keystore(
             &storage_dir,
@@ -488,12 +491,14 @@ impl AlephVaultEvmNativeWallet {
         ) else {
             return failed("crypto_error");
         };
-        if final_path.exists() && fs::remove_file(&final_path).is_err() {
+        if fs::rename(&final_path, &backup_path).is_err() {
             return failed("os_error");
         }
         if fs::rename(&new_path, &final_path).is_err() {
+            let _ = fs::rename(&backup_path, &final_path);
             return failed("os_error");
         }
+        let _ = fs::remove_file(&backup_path);
         success(Value::Null)
     }
 
@@ -874,18 +879,22 @@ impl AlephVaultEvmNativeWallet {
     }
 
     // Rationale: signing methods identify the signer by address, so this maps
-    // JSON-RPC address arguments to cached local wallets.
-    fn wallet_for_value(&self, value: &Value) -> Option<PrivateKeySigner> {
+    // JSON-RPC address arguments to the one unlocked native wallet.
+    fn wallet_for_value(&self, value: &Value) -> Option<&PrivateKeySigner> {
         let address = value.as_str().and_then(parse_address)?;
-        self.wallets.get(&address).cloned()
+        self.wallet
+            .as_ref()
+            .filter(|wallet| wallet.address() == address)
     }
 
     // Rationale: transaction requests may omit "from"; in that case native
-    // mirrors common wallet behavior by using the first configured account.
-    fn wallet_for_tx(&self, tx: &Value) -> Option<PrivateKeySigner> {
-        tx.get("from")
-            .and_then(|value| self.wallet_for_value(value))
-            .or_else(|| self.wallets.values().next().cloned())
+    // mirrors common wallet behavior by using the one unlocked account.
+    fn wallet_for_tx(&self, tx: &Value) -> Option<&PrivateKeySigner> {
+        if let Some(from) = tx.get("from") {
+            self.wallet_for_value(from)
+        } else {
+            self.wallet.as_ref()
+        }
     }
 
     // Rationale: all transaction signing funnels through one path so nonce,
@@ -899,6 +908,7 @@ impl AlephVaultEvmNativeWallet {
         let wallet = self
             .wallet_for_tx(tx)
             .ok_or_else(|| json_rpc_error(4100, "unknown account"))?
+            .clone()
             .with_chain_id(Some(chain_id as u64));
         let typed = self.prepare_transaction(tx, wallet.address())?;
         let signature = wallet
@@ -1025,13 +1035,13 @@ impl AlephVaultEvmNativeWallet {
     fn clear_unlocked_state(&mut self) {
         self.ready = false;
         self.accounts.clear();
-        self.wallets.clear();
+        self.wallet = None;
     }
 
     fn clear_ready_state(&mut self) {
         self.ready = false;
         self.accounts.clear();
-        self.wallets.clear();
+        self.wallet = None;
     }
 
     fn clear_all_state(&mut self) {
@@ -1039,7 +1049,7 @@ impl AlephVaultEvmNativeWallet {
         self.chain_id = 0;
         self.rpc_url.clear();
         self.accounts.clear();
-        self.wallets.clear();
+        self.wallet = None;
     }
 
     fn config_json(&self) -> Value {

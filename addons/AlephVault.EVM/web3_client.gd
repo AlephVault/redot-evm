@@ -676,7 +676,7 @@ func manages_wallet() -> bool:
 	return _binding.manages_wallet()
 
 ## Creates the native single-account wallet with password-protected storage.
-## Web bindings return {"ok": false, "error": "not_supported"}.
+## The wallet remains locked afterwards. Web bindings return not_supported.
 func account_create(password: String):
 	return _binding.account_create(password)
 
@@ -691,7 +691,7 @@ func account_backup(target_path: String):
 	return _binding.account_backup(target_path)
 
 ## Restores an encrypted native keystore from source_path when unset.
-## Web bindings return {"ok": false, "error": "not_supported"}.
+## The wallet remains locked afterwards. Web bindings return not_supported.
 func account_restore(source_path: String):
 	return _binding.account_restore(source_path)
 
@@ -712,7 +712,8 @@ func account_set_password(password: String):
 
 ## Sets the native wallet HTTP RPC URL and infers chain id from eth_chainId.
 ## The chain is transient and is not stored on disk. This is independent from
-## set_chain_id(). Web bindings return not_supported.
+## set_chain_id(); call it again after process restart. Web bindings return
+## not_supported.
 func set_chain(rpc_url: String):
 	return _binding.set_chain(rpc_url)
 

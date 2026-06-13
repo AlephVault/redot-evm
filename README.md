@@ -21,16 +21,18 @@ wallet/account material. Native bindings return `true`; web bindings return
 Native wallet lifecycle:
 
 - `account_create(password)` creates the single encrypted native account when
-  no account is configured.
+  no account is configured. The wallet remains locked afterwards.
 - `account_restore(source_path)` restores an encrypted backup when no account
-  is configured.
+  is configured. The wallet remains locked afterwards and must be unlocked with
+  the same password used by that keystore.
 - `account_destroy()`, `account_backup(target_path)`, and
   `account_unlock(password)` require a configured but locked native account.
 - `account_lock()` and `account_set_password(password)` require an unlocked
   native account. Locking also de-initializes the Godot binding cache.
 - `set_chain(rpc_url)` can be called in any native wallet state. It accepts an
   HTTP(S) RPC URL, infers the chain id from `eth_chainId`, and keeps that chain
-  configuration only in process memory.
+  configuration only in process memory. Call it again after process restart
+  before native `initialize()`.
 
 Native wallets expose only one account address. Private keys are generated,
 encrypted, decrypted, and used for signing inside the Rust binding; GDScript
