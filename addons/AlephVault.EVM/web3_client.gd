@@ -343,6 +343,16 @@ func _init():
 #       returned if checksum validation is requested but the binding is
 #       not complete enough to compute/verify the checksum.
 #
+# 28a. can_manage_private_keys() returning bool:
+#      Returns true when the binding can validate/import local private keys.
+#
+# 28b. validate_private_key(private_key: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is the EIP-55 checksum address derived from the key.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_value", "not_supported", or
+#       "incomplete_binding".
+#
 # --------- Contract-related methods ---------
 #
 # 29. contract_create(address: String, abi_key: String) returning:
@@ -663,6 +673,16 @@ func validate_bytes(value: Variant, size: int = 0):
 ## the address must also satisfy the checksum rules.
 func validate_address(value: String, checksum: bool = false):
 	return _binding.validate_address(value, checksum)
+
+## Returns whether this binding can validate and manage local private keys.
+func can_manage_private_keys() -> bool:
+	return _binding.can_manage_private_keys()
+
+## Validates a native private key and returns its derived checksum address.
+##
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func validate_private_key(private_key: String):
+	return _binding.validate_private_key(private_key)
 
 # --------- Contract-related methods ---------
 

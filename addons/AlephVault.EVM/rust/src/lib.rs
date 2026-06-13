@@ -320,6 +320,17 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: native account management starts from private keys, so this
+    // validates key syntax and returns the derived checksum address for preview
+    // or import flows without mutating wallet state.
+    fn validate_private_key(&self, private_key: GString) -> Dictionary {
+        match LocalWallet::from_str(&private_key.to_string()) {
+            Ok(wallet) => success(json!(format_address(wallet.address()))),
+            Err(_) => failed("invalid_value"),
+        }
+    }
+
+    #[func]
     // Rationale: explicit ABI encoding lets callers construct calldata or hash
     // inputs without creating a contract instance.
     fn abi_encode(&self, args_json: GString) -> Dictionary {

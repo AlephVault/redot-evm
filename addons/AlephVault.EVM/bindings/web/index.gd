@@ -259,6 +259,14 @@ func validate_bytes(value: Variant, size: int = 0):
 func validate_address(value: String, checksum: bool = false):
 	return _eval_response("window.alephVaultEvmWeb3.validateAddress(%s, %s)" % [_json(value), _json(checksum)])
 
+## Returns false because browser wallets do not expose private keys.
+func can_manage_private_keys() -> bool:
+	return false
+
+## Web builds cannot inspect or validate private keys.
+func validate_private_key(_private_key: String):
+	return Async.failed("not_supported")
+
 ## Encodes bytes as a 0x-prefixed lowercase hex string.
 func to_hex(value: PackedByteArray):
 	return Async.success(_to_hex_value(value))

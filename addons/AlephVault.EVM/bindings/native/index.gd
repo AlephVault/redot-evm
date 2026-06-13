@@ -232,6 +232,16 @@ func validate_address(value: String, checksum: bool = false):
 		return Async.failed("incomplete_binding")
 	return _wallet.validate_address(value, checksum)
 
+## Returns true because native wallets own local private-key material.
+func can_manage_private_keys() -> bool:
+	return true
+
+## Validates a private key and returns its derived checksum address.
+func validate_private_key(private_key: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.validate_private_key(private_key)
+
 func to_hex(value: PackedByteArray):
 	var hex := "0x"
 	for byte in value:
