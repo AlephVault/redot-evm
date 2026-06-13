@@ -18,6 +18,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tiny_keccak::{Hasher, Keccak};
 
+const DEFAULT_CHAIN_ID: i64 = 1;
+const DEFAULT_RPC_URL: &str = "https://ethereum-json-rpc.stakely.io";
+
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
 struct AlephVaultEvmNativeWallet {
@@ -83,42 +86,20 @@ impl IRefCounted for AlephVaultEvmNativeWallet {
 #[godot_api]
 impl AlephVaultEvmNativeWallet {
     #[func]
-    // Rationale: native builds currently receive one fixed RPC chain and an
-    // account list from the GDScript binding. The list may be empty until the
-    // future account-discovery flow supplies local signing keys.
-    fn initialize(&mut self, config_json: GString) -> Dictionary {
-        let Ok(config) = serde_json::from_str::<Value>(&config_json.to_string()) else {
-            return failed("invalid_config");
-        };
-
-        let Some(chain_id) = config
-            .get("chain_id")
-            .or_else(|| config.get("chainId"))
-            .and_then(chain_id_value_to_i64)
-        else {
-            return failed("no_valid_chains");
-        };
-
-        if chain_id <= 0 {
-            return failed("no_valid_chains");
-        }
-
-        let Some(rpc_url) = config
-            .get("rpc_url")
-            .or_else(|| config.get("rpcUrl"))
-            .and_then(Value::as_str)
-        else {
-            return failed("no_valid_chains");
-        };
-
-        let (accounts, wallets) = collect_accounts(&config);
-
+    // Rationale: native initialization owns the temporary chain/account source
+    // and reports it upward to GDScript. Godot consumes this dictionary for its
+    // cache, while the public facade still resolves initialize() with null.
+    fn initialize(&mut self) -> Dictionary {
         self.ready = true;
-        self.chain_id = chain_id;
-        self.rpc_url = rpc_url.to_owned();
-        self.accounts = accounts;
-        self.wallets = wallets;
-        success(Value::Null)
+        self.chain_id = DEFAULT_CHAIN_ID;
+        self.rpc_url = DEFAULT_RPC_URL.to_owned();
+        self.accounts.clear();
+        self.wallets.clear();
+        success(json!({
+            "chain_id": self.chain_id,
+            "rpc_url": self.rpc_url,
+            "accounts": self.accounts,
+        }))
     }
 
     #[func]
@@ -346,6 +327,17 @@ impl AlephVaultEvmNativeWallet {
             return failed("invalid_value");
         }
         success(Value::Null)
+    }
+
+    #[func]
+    // Rationale: encrypted storage needs native secp256k1 address derivation
+    // for imported keys, but the public client facade does not expose private
+    // key validation/import helpers.
+    fn private_key_to_address(&self, private_key: GString) -> Dictionary {
+        match PrivateKeySigner::from_str(&private_key.to_string()) {
+            Ok(wallet) => success(json!(format_address(wallet.address()))),
+            Err(_) => failed("invalid_value"),
+        }
     }
 
     #[func]
@@ -852,37 +844,6 @@ impl AlephVaultEvmNativeWallet {
         let abi_json = self.abis.get(key)?;
         serde_json::from_str::<JsonAbi>(abi_json).ok()
     }
-}
-
-// Rationale: initialization accepts account objects with privateKey/private_key and
-// optional name metadata; only valid keys become exposed/signing accounts.
-fn collect_accounts(config: &Value) -> (Vec<String>, HashMap<Address, PrivateKeySigner>) {
-    let mut wallets = HashMap::new();
-    let mut accounts = Vec::new();
-
-    if let Some(config_accounts) = config.get("accounts").and_then(Value::as_array) {
-        for account in config_accounts {
-            if let Some(key) = account
-                .as_object()
-                .and_then(|account| {
-                    account
-                        .get("privateKey")
-                        .or_else(|| account.get("private_key"))
-                })
-                .and_then(Value::as_str)
-            {
-                if let Ok(wallet) = PrivateKeySigner::from_str(key) {
-                    let address = format_address(wallet.address());
-                    if !accounts.iter().any(|known| known == &address) {
-                        accounts.push(address);
-                    }
-                    wallets.insert(wallet.address(), wallet);
-                }
-            }
-        }
-    }
-
-    (accounts, wallets)
 }
 
 // Rationale: non-wallet JSON-RPC calls are intentionally thin pass-throughs so

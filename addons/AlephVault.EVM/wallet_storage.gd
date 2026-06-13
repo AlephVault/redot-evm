@@ -26,8 +26,6 @@ const VERSION := 1
 const KDF_ITERATIONS := 50000
 const KDF_NAME := "pbkdf2-hmac-sha256"
 const SENTINEL_TEXT := "AlephVault.EVM.wallet_storage.v1"
-const VALIDATION_CHAIN_ID := 1
-const VALIDATION_RPC_URL := "https://ethereum-json-rpc.stakely.io"
 
 static var _singleton = null
 
@@ -426,20 +424,7 @@ func _save_contents(contents: Dictionary) -> Dictionary:
 func _derive_private_key_address(private_key: String) -> Dictionary:
 	if _validator == null:
 		return _failed("incomplete_binding")
-	var response = _validator.initialize(JSON.stringify({
-		"chain_id": VALIDATION_CHAIN_ID,
-		"rpc_url": VALIDATION_RPC_URL,
-		"accounts": [{"privateKey": private_key}],
-	}))
-	if not response.get("ok", false):
-		return response
-	var accounts_response = _validator.get_accounts()
-	if not accounts_response.get("ok", false):
-		return accounts_response
-	var accounts = accounts_response.get("value", [])
-	if not (accounts is Array) or accounts.is_empty():
-		return _failed("invalid_value")
-	return _success(String(accounts[0]))
+	return _validator.private_key_to_address(private_key)
 
 func _account_index(address: String) -> int:
 	for i in range(_accounts.size()):

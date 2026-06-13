@@ -15,18 +15,15 @@ var _config := {}
 var _accounts: Array = []
 var _chain_id: int = 0
 
-const DEFAULT_CHAIN_ID := 1
-const DEFAULT_RPC_URL := "https://ethereum-json-rpc.stakely.io"
-
 func _init():
 	if ClassDB.class_exists("AlephVaultEvmNativeWallet"):
 		_wallet = ClassDB.instantiate("AlephVaultEvmNativeWallet")
 
-## Initializes the native wallet with the temporary built-in chain/account
-## source. The native wallet is fixed to Ethereum mainnet, uses the Stakely
-## public RPC endpoint, and starts with no accounts until the future account
-## discovery/import flow supplies them. Success returns {"ok": true, "value":
-## null}; accounts are cached internally and exposed through get_accounts().
+## Initializes the native wallet and reads the temporary chain/account source
+## returned by the native extension. The Rust wallet currently reports Ethereum
+## mainnet, the Stakely public RPC endpoint, and no accounts. Success returns
+## {"ok": true, "value": null}; accounts are cached internally and exposed
+## through get_accounts().
 ##
 ## Transaction config dictionaries use the same names in both bindings:
 ## "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
@@ -38,24 +35,17 @@ func initialize():
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
 
-	_config = {
-		"chain_id": DEFAULT_CHAIN_ID,
-		"rpc_url": DEFAULT_RPC_URL,
-		"accounts": [],
-	}
-
-	var response = _wallet.initialize(JSON.stringify(_config))
+	var response = _wallet.initialize()
 	if not response.get("ok", false):
 		return response
 
+	var value = response.get("value", {})
+	if not (value is Dictionary):
+		return Async.failed("invalid_config")
+	_config = value
 	_ready = true
-	_accounts = []
-	var accounts_response = _wallet.get_accounts()
-	if accounts_response.get("ok", false):
-		_accounts = accounts_response.get("value", [])
-	var chain_response = _wallet.get_chain_id()
-	if chain_response.get("ok", false):
-		_chain_id = int(chain_response.get("value", 0))
+	_accounts = _config.get("accounts", [])
+	_chain_id = int(_config.get("chain_id", _config.get("chainId", 0)))
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null:
 		return Async.failed("incomplete_binding")

@@ -423,10 +423,11 @@ func _init():
 ## - Web bindings will do it directly against the EIP-1193 wallet.
 ##   When the wallet is ready (the web3 instance), then this call
 ##   will resolve successfully with {"ok": true, "value": null}.
-## - Native bindings initialize from their internal state a certain
-##   account and a certain chain (chain/account switching will not
-##   be supported this way, unless per-game logic or reinstalling
-##   a different account).
+## - Native bindings receive their temporary chain/account source from the Rust
+##   native wallet: Ethereum mainnet (chain id 1),
+##   https://ethereum-json-rpc.stakely.io, and no accounts. A later
+##   account-discovery flow may populate accounts. Success still resolves as
+##   {"ok": true, "value": null}.
 func initialize():
 	return _binding.initialize()
 
