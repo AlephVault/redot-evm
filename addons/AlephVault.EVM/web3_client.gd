@@ -413,6 +413,15 @@ func _init():
 #       "invalid_event", or "invalid_log".
 #     This method is synchronous and decodes events from a transaction
 #     object previously returned by wait_for().
+#
+# Other agreements related to data marshalling are needed:
+#
+# - Transaction config dictionaries use the same names in both bindings:
+#   "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
+#   "maxPriorityFeePerGas", "nonce", "chainId", "chain_id", and "data".
+#   Numeric fields accept decimal strings, 0x-prefixed hex quantities, or
+#   JSON integers; use strings for large values.
+# - Contract view calls may also pass "block" or "blockTag".
 
 # --------- Essential, non-contract, methods ---------
 # These are essential methods related to managing sessions in the
@@ -441,12 +450,6 @@ func _init():
 ##   {"privateKey": "0x...", "name": "My Key"}. "name" may be empty, null,
 ##   or absent; it is currently metadata only. Every exposed native account is
 ##   derived from a valid privateKey and can sign locally.
-## - Transaction config dictionaries use the same names in both bindings:
-##   "from", "value", "gas", "gasLimit", "gasPrice", "maxFeePerGas",
-##   "maxPriorityFeePerGas", "nonce", "chainId", "chain_id", and "data".
-##   Numeric fields accept decimal strings, 0x-prefixed hex quantities, or
-##   JSON integers; use strings for large values. Contract view calls may also
-##   pass "block" or "blockTag".
 func initialize(callback: Callable):
 	return _binding.initialize(callback)
 
