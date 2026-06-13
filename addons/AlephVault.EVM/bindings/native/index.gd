@@ -18,6 +18,16 @@ func _init():
 	if ClassDB.class_exists("AlephVaultEvmNativeWallet"):
 		_wallet = ClassDB.instantiate("AlephVaultEvmNativeWallet")
 
+## Initializes the native wallet from callback-provided config.
+##
+## The callback may return either the config dictionary directly or a standard
+## {"ok": true, "value": Dictionary} response. Required config:
+## - "chains": non-empty Array of chain dictionaries. Each chain needs an id
+##   in "id", "chain_id", or "chainId", plus "rpc_url" or "rpcUrl".
+## - Optional top-level "chain_id" or "chainId" selects the initial chain.
+## - Signing accounts come from "private_keys" / "privateKeys" or account
+##   dictionaries with "private_key" / "privateKey". Address-only accounts are
+##   exposed by get_accounts(), but cannot sign transactions.
 func initialize(callback: Callable):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
@@ -75,7 +85,13 @@ func get_balance(address: String):
 		return Async.failed("not_ready")
 	if not _is_non_zero_address(address):
 		return Async.failed("invalid_address")
-	return request("eth_getBalance", [address, "latest"])
+	var response = await request("eth_getBalance", [address, "latest"])
+	if not response.get("ok", false):
+		return response
+	var decimal_response = hex_to_decimal(String(response.get("value", "0x0")))
+	if not decimal_response.get("ok", false):
+		return Async.failed("invalid_response")
+	return decimal_response
 
 func transfer(address: String, amount: String, tx_config: Dictionary):
 	if not _ready:
@@ -118,7 +134,7 @@ func wait_for(tx_hash: String):
 func request(method: String, params: Array):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	if not _ready and method != "eth_accounts":
+	if not _ready and method != "eth_accounts" and method != "eth_requestAccounts":
 		return Async.failed("not_ready")
 	var response = _wallet.request(method, JSON.stringify(params))
 	if response.get("ok", false) and method == "wallet_switchEthereumChain":

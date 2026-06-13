@@ -68,12 +68,14 @@ impl AlephVaultEvmNativeWallet {
         let selected_chain_id = config
             .get("chain_id")
             .or_else(|| config.get("chainId"))
-            .and_then(Value::as_i64)
+            .and_then(chain_id_value_to_i64)
             .or_else(|| {
                 chains
                     .first()
                     .and_then(|chain| chain.get("id"))
-                    .and_then(Value::as_i64)
+                    .or_else(|| chains.first().and_then(|chain| chain.get("chain_id")))
+                    .or_else(|| chains.first().and_then(|chain| chain.get("chainId")))
+                    .and_then(chain_id_value_to_i64)
             });
 
         let Some(chain_id) = selected_chain_id else {
@@ -82,7 +84,14 @@ impl AlephVaultEvmNativeWallet {
 
         let Some(chain) = chains
             .iter()
-            .find(|chain| chain.get("id").and_then(Value::as_i64) == Some(chain_id))
+            .find(|chain| {
+                chain
+                    .get("id")
+                    .or_else(|| chain.get("chain_id"))
+                    .or_else(|| chain.get("chainId"))
+                    .and_then(chain_id_value_to_i64)
+                    == Some(chain_id)
+            })
             .or_else(|| chains.first())
         else {
             return failed("no_valid_chains");
@@ -111,7 +120,9 @@ impl AlephVaultEvmNativeWallet {
             .filter_map(|chain| {
                 chain
                     .get("id")
-                    .and_then(Value::as_i64)
+                    .or_else(|| chain.get("chain_id"))
+                    .or_else(|| chain.get("chainId"))
+                    .and_then(chain_id_value_to_i64)
                     .map(|id| (id, chain.clone()))
             })
             .collect();
@@ -127,7 +138,7 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
-    fn set_chain_id(&mut self, chain_id: i64, config_json: GString) -> Dictionary {
+    fn set_chain_id(&mut self, chain_id: i64, _config_json: GString) -> Dictionary {
         if !self.ready {
             return failed("not_ready");
         }
@@ -135,16 +146,7 @@ impl AlephVaultEvmNativeWallet {
             return failed("invalid_chain");
         }
 
-        let Ok(config) = serde_json::from_str::<Value>(&config_json.to_string()) else {
-            return failed("invalid_chain");
-        };
-        let Some(chains) = config.get("chains").and_then(Value::as_array) else {
-            return failed("invalid_chain");
-        };
-        let Some(chain) = chains
-            .iter()
-            .find(|chain| chain.get("id").and_then(Value::as_i64) == Some(chain_id))
-        else {
+        let Some(chain) = self.chains.get(&chain_id) else {
             return failed("invalid_chain");
         };
         let Some(rpc_url) = chain
@@ -434,7 +436,12 @@ impl AlephVaultEvmNativeWallet {
                 &format!("0x{}", hex::encode(data)),
                 None,
             );
-            let response = rpc_request(&self.rpc_url, "eth_call", json!([call, "latest"]));
+            let block = tx_params
+                .get("block")
+                .or_else(|| tx_params.get("blockTag"))
+                .cloned()
+                .unwrap_or_else(|| json!("latest"));
+            let response = rpc_request(&self.rpc_url, "eth_call", json!([call, block]));
             return match response {
                 Ok(Value::String(hex_result)) => {
                     let Some(bytes) = decode_hex_bytes(&hex_result) else {
@@ -495,6 +502,9 @@ impl AlephVaultEvmNativeWallet {
         let Some(topics) = event_filter_topics(&event, &topics_value) else {
             return failed("invalid_topic");
         };
+        if !valid_block_range(&from.to_string(), &to.to_string()) {
+            return failed("invalid_block_range");
+        }
         let filter = json!({
             "address": address,
             "fromBlock": from.to_string(),
@@ -711,10 +721,15 @@ impl AlephVaultEvmNativeWallet {
     }
 
     fn sign_transaction(&self, tx: &Value) -> Result<Value, Value> {
+        let chain_id = tx
+            .get("chainId")
+            .or_else(|| tx.get("chain_id"))
+            .and_then(chain_id_value_to_i64)
+            .unwrap_or(self.chain_id);
         let wallet = self
             .wallet_for_tx(tx)
             .ok_or_else(|| json_rpc_error(4100, "unknown account"))?
-            .with_chain_id(self.chain_id as u64);
+            .with_chain_id(chain_id as u64);
         let typed = self.prepare_transaction(tx, wallet.address())?;
         let signature = block_on(wallet.sign_transaction(&typed))
             .map_err(|error| json_rpc_error(-32000, &error.to_string()))?;
@@ -788,7 +803,12 @@ impl AlephVaultEvmNativeWallet {
                 .gas(gas)
                 .max_fee_per_gas(max_fee_per_gas)
                 .max_priority_fee_per_gas(max_priority_fee_per_gas);
-            request.chain_id = Some(U64::from(self.chain_id as u64));
+            request.chain_id = Some(U64::from(
+                tx.get("chainId")
+                    .or_else(|| tx.get("chain_id"))
+                    .and_then(chain_id_value_to_i64)
+                    .unwrap_or(self.chain_id) as u64,
+            ));
             Ok(TypedTransaction::Eip1559(request))
         } else {
             let gas_price = match tx.get("gasPrice").and_then(value_to_u256) {
@@ -807,7 +827,12 @@ impl AlephVaultEvmNativeWallet {
                 .nonce(nonce)
                 .gas(gas)
                 .gas_price(gas_price)
-                .chain_id(self.chain_id as u64);
+                .chain_id(
+                    tx.get("chainId")
+                        .or_else(|| tx.get("chain_id"))
+                        .and_then(chain_id_value_to_i64)
+                        .unwrap_or(self.chain_id) as u64,
+                );
             Ok(TypedTransaction::Legacy(request))
         }
     }
@@ -934,6 +959,15 @@ fn hex_quantity_to_i64(hex: &str) -> Option<i64> {
         return None;
     }
     i64::from_str_radix(&hex[2..], 16).ok()
+}
+
+fn chain_id_value_to_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(value) => value.as_i64(),
+        Value::String(value) if value.starts_with("0x") => hex_quantity_to_i64(value),
+        Value::String(value) => value.parse::<i64>().ok(),
+        _ => None,
+    }
 }
 
 fn value_to_u256(value: &Value) -> Option<U256> {
@@ -1067,9 +1101,6 @@ fn value_to_token(value: &Value, kind: &ParamType) -> Option<Token> {
 fn infer_token(value: &Value) -> Option<Token> {
     match value {
         Value::Bool(value) => Some(Token::Bool(*value)),
-        Value::String(value) if is_non_zero_address(value) => {
-            parse_address(value).map(Token::Address)
-        }
         Value::String(value) if value.starts_with("0x") => {
             decode_hex_bytes(value).map(Token::Bytes)
         }
@@ -1131,10 +1162,30 @@ fn event_filter_topics(event: &Event, topics: &Value) -> Option<Vec<Value>> {
         if values.len() > 3 {
             return None;
         }
-        output.extend(values.iter().cloned());
+        for value in values {
+            if value.is_null() {
+                output.push(Value::Null);
+                continue;
+            }
+            let topic = value.as_str()?;
+            let bytes = decode_hex_bytes(topic)?;
+            if bytes.len() != 32 {
+                return None;
+            }
+            output.push(Value::String(topic.to_owned()));
+        }
         return Some(output);
     }
     if let Some(object) = topics.as_object() {
+        for name in object.keys() {
+            if !event
+                .inputs
+                .iter()
+                .any(|input| input.indexed && input.name == *name)
+            {
+                return None;
+            }
+        }
         for input in event.inputs.iter().filter(|input| input.indexed) {
             if let Some(value) = object.get(&input.name) {
                 let token = value_to_token(value, &input.kind)?;
@@ -1169,20 +1220,33 @@ fn decode_event_log(event: &Event, log: &Value) -> Option<Value> {
     }
     let data = decode_hex_bytes(log.get("data")?.as_str()?)?;
     let decoded = event.parse_log(RawLog { topics, data }).ok()?;
-    let args: Vec<Value> = decoded
-        .params
-        .into_iter()
-        .map(|param| json!({"name": param.name, "value": token_to_json(param.value)}))
-        .collect();
+    let mut args = serde_json::Map::new();
+    for (index, param) in decoded.params.into_iter().enumerate() {
+        let name = if param.name.is_empty() {
+            index.to_string()
+        } else {
+            param.name
+        };
+        args.insert(name, token_to_json(param.value));
+    }
     Some(json!({
-        "event": event.name,
-        "address": log.get("address").cloned().unwrap_or(Value::Null),
-        "transactionHash": log.get("transactionHash").cloned().unwrap_or(Value::Null),
-        "blockNumber": log.get("blockNumber").cloned().unwrap_or(Value::Null),
-        "logIndex": log.get("logIndex").cloned().unwrap_or(Value::Null),
+        "name": event.name,
         "args": args,
         "rawLog": log,
     }))
+}
+
+fn valid_block_range(from: &str, to: &str) -> bool {
+    if !(is_named_block_tag(from) || is_prefixed_hex_quantity(from)) {
+        return false;
+    }
+    if !(is_named_block_tag(to) || is_prefixed_hex_quantity(to)) {
+        return false;
+    }
+    if is_prefixed_hex_quantity(from) && is_prefixed_hex_quantity(to) {
+        return hex_quantity_to_i64(from) <= hex_quantity_to_i64(to);
+    }
+    true
 }
 
 fn convert_from_wei(amount: &str, unit: &str) -> Dictionary {
@@ -1325,6 +1389,13 @@ fn is_prefixed_hex_quantity(hex: &str) -> bool {
         && !hex[2..].contains("0x")
         && (hex.len() == 3 || !hex[2..].starts_with('0'))
         && hex[2..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_named_block_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "earliest" | "latest" | "pending" | "safe" | "finalized"
+    )
 }
 
 fn success(value: Value) -> Dictionary {

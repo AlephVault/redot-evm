@@ -416,6 +416,24 @@ func _init():
 ##   callback will typically resolve the involved accounts and
 ##   whatever data is needed (e.g. their private keys, to be used
 ##   inside the binding).
+##
+## Native callback contract:
+## - The callback may return the config dictionary directly, or a standard
+##   {"ok": true, "value": Dictionary} / {"ok": false, "error": Variant}
+##   response.
+## - The config must include "chains", a non-empty array. Each chain accepts
+##   "id", "chain_id", or "chainId" as an integer, decimal string, or
+##   0x-prefixed hex quantity, and must include "rpc_url" or "rpcUrl".
+## - The selected chain is read from top-level "chain_id" or "chainId"; if
+##   omitted, the first configured chain is used.
+## - Accounts are read from top-level "private_keys" / "privateKeys" and/or
+##   from "accounts". Each account entry may be a display-only address string,
+##   {"address": String}, or a signing account with "private_key" /
+##   "privateKey". Local signing and sending requires a matching private key.
+## - Transaction config dictionaries use JSON-RPC/web3 names: "from", "gas",
+##   "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "chainId",
+##   and "value". "gasLimit" and "chain_id" are also accepted natively as
+##   aliases. Contract view calls may also pass "block" or "blockTag".
 func initialize(callback: Callable):
 	return _binding.initialize(callback)
 
