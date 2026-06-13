@@ -21,8 +21,10 @@ class_name AlephVault__EVM_WalletStorage
 const STORAGE_DIR := "user://AlephVault.EVM"
 const STORAGE_PATH := "user://AlephVault.EVM/wallet_storage.json"
 const STORAGE_TMP_PATH := "user://AlephVault.EVM/wallet_storage.tmp"
+const STORAGE_BAK_PATH := "user://AlephVault.EVM/wallet_storage.bak"
 const VERSION := 1
 const KDF_ITERATIONS := 50000
+const KDF_NAME := "pbkdf2-hmac-sha256"
 const SENTINEL_TEXT := "AlephVault.EVM.wallet_storage.v1"
 
 static var _singleton = null
@@ -56,7 +58,7 @@ func is_supported() -> bool:
 	return not OS.has_feature("web") and _validator != null
 
 func exists() -> bool:
-	return FileAccess.file_exists(STORAGE_PATH)
+	return FileAccess.file_exists(STORAGE_PATH) or FileAccess.file_exists(STORAGE_BAK_PATH)
 
 func is_unlocked() -> bool:
 	return _unlocked
@@ -79,14 +81,17 @@ func create(password: String) -> Dictionary:
 	if salt.is_empty():
 		return _failed("crypto_error")
 	var keys := _derive_keys(password, salt)
+	if not _keys_valid(keys):
+		return _failed("crypto_error")
 	var sentinel := _encrypt_json(SENTINEL_TEXT, keys["enc_key"], keys["mac_key"], "sentinel")
 	if sentinel.is_empty():
+		_clear_key_material(keys["enc_key"], keys["mac_key"])
 		return _failed("crypto_error")
 
 	var contents := {
 		"version": VERSION,
 		"kdf": {
-			"name": "sha256-iterated",
+			"name": KDF_NAME,
 			"iterations": KDF_ITERATIONS,
 			"salt": _to_hex(salt),
 		},
@@ -114,8 +119,20 @@ func destroy() -> Dictionary:
 	if _unlocked:
 		return _failed("already_unlocked")
 
-	var error := DirAccess.remove_absolute(STORAGE_PATH)
-	if error != OK:
+	var deleted_any := false
+	if FileAccess.file_exists(STORAGE_PATH):
+		var error := DirAccess.remove_absolute(STORAGE_PATH)
+		if error != OK:
+			return _failed("os_error")
+		deleted_any = true
+	if FileAccess.file_exists(STORAGE_BAK_PATH):
+		var backup_error := DirAccess.remove_absolute(STORAGE_BAK_PATH)
+		if backup_error != OK:
+			return _failed("os_error")
+		deleted_any = true
+	if FileAccess.file_exists(STORAGE_TMP_PATH):
+		DirAccess.remove_absolute(STORAGE_TMP_PATH)
+	if not deleted_any:
 		return _failed("os_error")
 	return _success(null)
 
@@ -138,11 +155,15 @@ func unlock(password: String) -> Dictionary:
 		return load_response
 	var contents: Dictionary = load_response["value"]
 	var kdf: Dictionary = contents.get("kdf", {})
+	if String(kdf.get("name", "")) != KDF_NAME:
+		return _failed("invalid_storage")
 	var salt := _from_hex(String(kdf.get("salt", "")))
 	if salt.is_empty():
 		return _failed("invalid_storage")
 
 	var keys := _derive_keys(password, salt, int(kdf.get("iterations", KDF_ITERATIONS)))
+	if not _keys_valid(keys):
+		return _failed("crypto_error")
 	var sentinel = _decrypt_json(contents.get("sentinel", {}), keys["enc_key"], keys["mac_key"], "sentinel")
 	if sentinel != SENTINEL_TEXT:
 		_clear_key_material(keys["enc_key"], keys["mac_key"])
@@ -151,6 +172,7 @@ func unlock(password: String) -> Dictionary:
 	var unlocked_accounts: Array = []
 	for entry in contents.get("accounts", []):
 		if not (entry is Dictionary):
+			_clear_key_material(keys["enc_key"], keys["mac_key"])
 			return _failed("invalid_storage")
 		var private_key = _decrypt_json(entry.get("key", {}), keys["enc_key"], keys["mac_key"], "account")
 		if not (private_key is String):
@@ -203,6 +225,8 @@ func change_password(password: String) -> Dictionary:
 	if salt.is_empty():
 		return _failed("crypto_error")
 	var keys := _derive_keys(password, salt)
+	if not _keys_valid(keys):
+		return _failed("crypto_error")
 	var save_response := _write_unlocked_accounts(keys["enc_key"], keys["mac_key"], salt)
 	if not save_response.get("ok", false):
 		_clear_key_material(keys["enc_key"], keys["mac_key"])
@@ -338,7 +362,7 @@ func _write_unlocked_accounts(enc_key: PackedByteArray, mac_key: PackedByteArray
 	return _save_contents({
 		"version": VERSION,
 		"kdf": {
-			"name": "sha256-iterated",
+			"name": KDF_NAME,
 			"iterations": KDF_ITERATIONS,
 			"salt": _to_hex(salt),
 		},
@@ -354,7 +378,10 @@ func _current_salt() -> PackedByteArray:
 	return _from_hex(String(kdf.get("salt", "")))
 
 func _load_contents() -> Dictionary:
-	var file := FileAccess.open(STORAGE_PATH, FileAccess.READ)
+	var path := STORAGE_PATH
+	if not FileAccess.file_exists(path) and FileAccess.file_exists(STORAGE_BAK_PATH):
+		path = STORAGE_BAK_PATH
+	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return _failed("os_error")
 	var parsed = JSON.parse_string(file.get_as_text())
@@ -375,15 +402,24 @@ func _save_contents(contents: Dictionary) -> Dictionary:
 	file.store_string(JSON.stringify(contents))
 	file.close()
 
+	if FileAccess.file_exists(STORAGE_BAK_PATH):
+		var remove_backup_error := DirAccess.remove_absolute(STORAGE_BAK_PATH)
+		if remove_backup_error != OK:
+			DirAccess.remove_absolute(STORAGE_TMP_PATH)
+			return _failed("os_error")
 	if FileAccess.file_exists(STORAGE_PATH):
-		var remove_error := DirAccess.remove_absolute(STORAGE_PATH)
-		if remove_error != OK:
+		var backup_error := DirAccess.rename_absolute(STORAGE_PATH, STORAGE_BAK_PATH)
+		if backup_error != OK:
 			DirAccess.remove_absolute(STORAGE_TMP_PATH)
 			return _failed("os_error")
 	var rename_error := DirAccess.rename_absolute(STORAGE_TMP_PATH, STORAGE_PATH)
 	if rename_error != OK:
 		DirAccess.remove_absolute(STORAGE_TMP_PATH)
+		if FileAccess.file_exists(STORAGE_BAK_PATH):
+			DirAccess.rename_absolute(STORAGE_BAK_PATH, STORAGE_PATH)
 		return _failed("os_error")
+	if FileAccess.file_exists(STORAGE_BAK_PATH):
+		DirAccess.remove_absolute(STORAGE_BAK_PATH)
 	return _success(null)
 
 func _validate_private_key(private_key: String) -> Dictionary:
@@ -399,7 +435,7 @@ func _account_index(address: String) -> int:
 
 func _encrypt_json(value: Variant, enc_key: PackedByteArray, mac_key: PackedByteArray, aad: String) -> Dictionary:
 	var plaintext := JSON.stringify(value).to_utf8_buffer()
-	var nonce := _random_bytes(16)
+	var nonce := _random_bytes(12)
 	if nonce.is_empty():
 		return {}
 	var ciphertext := _crypt_ctr(plaintext, enc_key, nonce)
@@ -417,7 +453,7 @@ func _decrypt_json(payload: Variant, enc_key: PackedByteArray, mac_key: PackedBy
 	var nonce := _from_hex(String(payload.get("nonce", "")))
 	var ciphertext := _from_hex(String(payload.get("ciphertext", "")))
 	var expected_mac := _from_hex(String(payload.get("mac", "")))
-	if nonce.is_empty() or expected_mac.is_empty():
+	if nonce.size() != 12 or expected_mac.size() != 32:
 		return null
 	var actual_mac := _mac(mac_key, aad, nonce, ciphertext)
 	if not _constant_time_equal(actual_mac, expected_mac):
@@ -427,22 +463,17 @@ func _decrypt_json(payload: Variant, enc_key: PackedByteArray, mac_key: PackedBy
 
 func _derive_keys(password: String, salt: PackedByteArray, iterations: int = KDF_ITERATIONS) -> Dictionary:
 	var password_bytes := password.to_utf8_buffer()
-	var material_input := PackedByteArray()
-	material_input.append_array(salt)
-	material_input.append_array(password_bytes)
-	var material := _sha256(material_input)
-	for _i in range(max(1, iterations)):
-		var next := PackedByteArray()
-		next.append_array(material)
-		next.append_array(salt)
-		next.append_array(password_bytes)
-		material = _sha256(next)
+	var material := _pbkdf2_hmac_sha256(password_bytes, salt, max(1, iterations), 32)
+	if material.size() != 32:
+		return {}
 	return {
-		"enc_key": _sha256(_join_bytes([material, "enc".to_utf8_buffer()])),
-		"mac_key": _sha256(_join_bytes([material, "mac".to_utf8_buffer()])),
+		"enc_key": _hmac_sha256(material, "enc".to_utf8_buffer()),
+		"mac_key": _hmac_sha256(material, "mac".to_utf8_buffer()),
 	}
 
 func _crypt_ctr(input: PackedByteArray, key: PackedByteArray, nonce: PackedByteArray) -> PackedByteArray:
+	if key.size() != 32 or nonce.size() != 12:
+		return PackedByteArray()
 	var output := PackedByteArray()
 	output.resize(input.size())
 	var counter := 0
@@ -476,16 +507,57 @@ func _counter_block(nonce: PackedByteArray, counter: int) -> PackedByteArray:
 	return block
 
 func _mac(key: PackedByteArray, aad: String, nonce: PackedByteArray, ciphertext: PackedByteArray) -> PackedByteArray:
-	var context := HMACContext.new()
-	if context.start(HashingContext.HASH_SHA256, key) != OK:
-		return PackedByteArray()
-	context.update(_join_bytes([
+	return _hmac_sha256(key, _join_bytes([
 		"mac:v1".to_utf8_buffer(),
 		aad.to_utf8_buffer(),
 		nonce,
 		ciphertext,
 	]))
+
+func _hmac_sha256(key: PackedByteArray, bytes: PackedByteArray) -> PackedByteArray:
+	var context := HMACContext.new()
+	if context.start(HashingContext.HASH_SHA256, key) != OK:
+		return PackedByteArray()
+	context.update(bytes)
 	return context.finish()
+
+func _pbkdf2_hmac_sha256(password: PackedByteArray, salt: PackedByteArray, iterations: int, output_size: int) -> PackedByteArray:
+	var output := PackedByteArray()
+	var block_index := 1
+	while output.size() < output_size:
+		var block_input := PackedByteArray()
+		block_input.append_array(salt)
+		block_input.append_array(_u32_be(block_index))
+		var u := _hmac_sha256(password, block_input)
+		if u.size() != 32:
+			return PackedByteArray()
+		var t := u.duplicate()
+		for _i in range(1, iterations):
+			u = _hmac_sha256(password, u)
+			if u.size() != 32:
+				return PackedByteArray()
+			for j in range(t.size()):
+				t[j] = t[j] ^ u[j]
+		output.append_array(t)
+		block_index += 1
+	return _slice_bytes(output, 0, output_size)
+
+func _keys_valid(keys: Dictionary) -> bool:
+	return keys.has("enc_key") and keys.has("mac_key") and keys["enc_key"].size() == 32 and keys["mac_key"].size() == 32
+
+func _u32_be(value: int) -> PackedByteArray:
+	var output := PackedByteArray()
+	output.append((value >> 24) & 0xff)
+	output.append((value >> 16) & 0xff)
+	output.append((value >> 8) & 0xff)
+	output.append(value & 0xff)
+	return output
+
+func _slice_bytes(bytes: PackedByteArray, offset: int, size: int) -> PackedByteArray:
+	var output := PackedByteArray()
+	for i in range(size):
+		output.append(bytes[offset + i])
+	return output
 
 func _sha256(bytes: PackedByteArray) -> PackedByteArray:
 	var context := HashingContext.new()
