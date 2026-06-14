@@ -16,7 +16,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MyERC20 is ERC20, Ownable {
     constructor() ERC20("MyERC20", "SMPL") Ownable(msg.sender) {}
 
-    function decimals() public view virtual returns (uint8) {
+    function decimals() public view virtual override returns (uint8) {
         return 18;
     }
 
