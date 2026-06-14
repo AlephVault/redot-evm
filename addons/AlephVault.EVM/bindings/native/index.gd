@@ -133,6 +133,18 @@ func request(method: String, params: Array):
 		return Async.failed("not_ready")
 	return _wallet.request(method, JSON.stringify(params))
 
+func verify_personal_sign(address: String, message: Variant, signature: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	if not (message is String):
+		return Async.failed("invalid_message")
+	return _wallet.verify_personal_sign(address, message, signature)
+
+func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.verify_eth_sign_typed_data(address, JSON.stringify(typed_data), signature)
+
 func set_abi(key: String, abi: Array[Dictionary]):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")

@@ -154,6 +154,16 @@ func request(method: String, params: Array):
 		return Async.failed("not_ready")
 	return await _request(method, params)
 
+## Verifies a personal_sign signature against an expected address.
+func verify_personal_sign(address: String, message: Variant, signature: String):
+	if not (message is String):
+		return Async.failed("invalid_message")
+	return _eval_response("window.alephVaultEvmWeb3.verifyPersonalSign(%s, %s, %s)" % [_json(address), _json(message), _json(signature)])
+
+## Verifies an EIP-712 typed-data signature against an expected address.
+func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String):
+	return _eval_response("window.alephVaultEvmWeb3.verifyTypedData(%s, %s, %s)" % [_json(address), _json(typed_data), _json(signature)])
+
 ## Stores an ABI in the JavaScript-side ABI cache.
 ##
 ## The key must be an alphanumeric/underscore identifier. Contract helpers use

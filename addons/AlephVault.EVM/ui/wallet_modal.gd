@@ -21,7 +21,7 @@ var _pending_password := ""
 var _address := ""
 var _backup_dialog: FileDialog = null
 var _restore_dialog: FileDialog = null
-var _file_dialog_step = null
+var _file_dialog_step: Control = null
 
 
 class WelcomeStep:
@@ -157,7 +157,7 @@ class MainStep:
 		status = ""
 
 		var modal = get_parent()
-		var address := modal._get_current_address()
+		var address: String = modal._get_current_address()
 		_add_text("Unlocked account address:")
 		_add_address(address)
 

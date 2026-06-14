@@ -5,7 +5,7 @@ use alloy_dyn_abi::{
 use alloy_eips::eip2718::Encodable2718;
 use alloy_eips::eip2930::AccessList;
 use alloy_json_abi::{Event, Function, JsonAbi, Param, StateMutability};
-use alloy_primitives::{Address, Bytes, TxKind, B256, I256, U256};
+use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, I256, U256};
 use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
 use godot::builtin::{Array, Dictionary, GString, PackedByteArray, Variant};
@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tiny_keccak::{Hasher, Keccak};
 
 const KEYSTORE_FILE: &str = "account.json";
@@ -180,6 +181,74 @@ impl AlephVaultEvmNativeWallet {
         match result {
             Ok(value) => success(value),
             Err(error) => error_response(error),
+        }
+    }
+
+    #[func]
+    // Rationale: verification is pure address recovery, so it should be
+    // available without exposing private keys or requiring an RPC call.
+    fn verify_personal_sign(
+        &self,
+        address: GString,
+        message: GString,
+        signature: GString,
+    ) -> Dictionary {
+        let address = address.to_string();
+        let Some(expected) = normalize_address(&address) else {
+            return failed("invalid_address");
+        };
+        let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
+            return failed("invalid_message");
+        };
+        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
+            return failed("invalid_signature");
+        };
+        match signature.recover_address_from_msg(&bytes) {
+            Ok(recovered) => success(json!(
+                hex::encode(recovered.as_slice()).eq_ignore_ascii_case(&expected)
+            )),
+            Err(_) => failed("invalid_signature"),
+        }
+    }
+
+    #[func]
+    // Rationale: EIP-712 verification uses the same typed-data hash that the
+    // native signer uses for eth_signTypedData variants.
+    fn verify_eth_sign_typed_data(
+        &self,
+        address: GString,
+        typed_data_json: GString,
+        signature: GString,
+    ) -> Dictionary {
+        let address = address.to_string();
+        let Some(expected) = normalize_address(&address) else {
+            return failed("invalid_address");
+        };
+        let Ok(typed_value) = serde_json::from_str::<Value>(&typed_data_json.to_string()) else {
+            return failed("invalid_typed_data");
+        };
+        let typed_value = if typed_value.is_string() {
+            match serde_json::from_str::<Value>(typed_value.as_str().unwrap()) {
+                Ok(value) => value,
+                Err(_) => return failed("invalid_typed_data"),
+            }
+        } else {
+            typed_value
+        };
+        let Ok(typed_data) = serde_json::from_value::<TypedData>(typed_value) else {
+            return failed("invalid_typed_data");
+        };
+        let Ok(hash) = typed_data.eip712_signing_hash() else {
+            return failed("invalid_typed_data");
+        };
+        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
+            return failed("invalid_signature");
+        };
+        match signature.recover_address_from_prehash(&hash) {
+            Ok(recovered) => success(json!(
+                hex::encode(recovered.as_slice()).eq_ignore_ascii_case(&expected)
+            )),
+            Err(_) => failed("invalid_signature"),
         }
     }
 
