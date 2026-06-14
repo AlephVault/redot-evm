@@ -15,6 +15,7 @@ extends PanelContainer
 var _root: VBoxContainer = null
 var _top_buttons: HBoxContainer = null
 var _scroll: ScrollContainer = null
+var _content_center: VBoxContainer = null
 var _content: VBoxContainer = null
 var _status_label: Label = null
 var _bottom_buttons: HBoxContainer = null
@@ -168,14 +169,31 @@ func _ensure_structure() -> void:
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.resized.connect(_update_content_center_size)
 	_root.add_child(_scroll)
+
+	_content_center = VBoxContainer.new()
+	_content_center.name = "ContentCenter"
+	_content_center.theme_type_variation = "ModalContentCenter"
+	_content_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_content_center)
+
+	var top_content_spacer := Control.new()
+	top_content_spacer.name = "TopContentSpacer"
+	top_content_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content_center.add_child(top_content_spacer)
 
 	_content = VBoxContainer.new()
 	_content.name = "Content"
 	_content.theme_type_variation = "ModalContent"
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.add_child(_content)
+	_content_center.add_child(_content)
+
+	var bottom_content_spacer := Control.new()
+	bottom_content_spacer.name = "BottomContentSpacer"
+	bottom_content_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content_center.add_child(bottom_content_spacer)
 
 	_status_label = Label.new()
 	_status_label.name = "StatusLabel"
@@ -206,6 +224,14 @@ func _ensure_structure() -> void:
 	_bottom_buttons.add_child(_secondary_button)
 
 	_apply_initial_button_values()
+	_update_content_center_size()
+
+
+func _update_content_center_size() -> void:
+	if _content_center == null or _scroll == null:
+		return
+
+	_content_center.custom_minimum_size = Vector2(0.0, _scroll.size.y)
 
 
 func _apply_initial_button_values() -> void:

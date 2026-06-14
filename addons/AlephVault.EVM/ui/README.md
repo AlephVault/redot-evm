@@ -148,6 +148,7 @@ The modal step internals use `theme_type_variation` names so a single theme can 
 | `ModalTopButtons` | Top `HBoxContainer` |
 | `ModalTopButton` | Both top buttons |
 | `ModalContentScroll` | `ScrollContainer` around step content |
+| `ModalContentCenter` | Centering wrapper inside the scroll area |
 | `ModalContent` | Scrollable content `VBoxContainer` |
 | `ModalStatusLabel` | Status `Label` |
 | `ModalBottomButtons` | Bottom `HBoxContainer` |
@@ -263,7 +264,7 @@ theme.set_stylebox("pressed", "ModalSecondaryButton", pressed)
 
 ### Scroll Area
 
-`ModalContentScroll` targets the scroll container. Use it for scrollbar styles and scroll-related theme values. `ModalContent` targets the inner `VBoxContainer`; use it for content spacing.
+`ModalContentScroll` targets the scroll container. Use it for scrollbar styles and scroll-related theme values. `ModalContentCenter` targets the wrapper that vertically centers short content. `ModalContent` targets the inner `VBoxContainer`; use it for content spacing.
 
 ```gdscript
 theme.set_constant("separation", "ModalContent", 10)
