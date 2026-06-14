@@ -1,3 +1,3 @@
 extends Object
 
-const Modal = preload("./modal.gd")
+const ModalStep = preload("./modal_step.gd")
