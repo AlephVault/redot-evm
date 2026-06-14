@@ -3,3 +3,5 @@
 /android/
 **/target/
 **/node_modules/
+addons/AlephVault.EVM/samples/blockchain/artifacts
+addons/AlephVault.EVM/samples/blockchain/cache
