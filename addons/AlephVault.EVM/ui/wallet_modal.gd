@@ -84,6 +84,7 @@ class WelcomeStep:
 		secondary_button_text = "Restore"
 
 		_add_text("No native wallet account exists. Create a new account with a master password, or restore an encrypted account backup.")
+		_add_text("Plain unencrypted imports are also accepted as a text file containing 0x..., or JSON containing private_key/privateKey. These imports create the encrypted wallet with password \"default\".")
 		_create_password_edit = _add_password_edit("New master password")
 		_create_confirm_edit = _add_password_edit("Confirm master password")
 
@@ -143,13 +144,12 @@ class MainStep:
 	extends WalletModalStep
 
 	## Shows the unlocked address and wallet startup actions.
-	##
-	## This step never displays or exposes a private key.
 	func _on_show() -> void:
 		clear_content()
 		lt_button_visible = true
 		lt_button_text = "Lock"
-		rt_button_visible = false
+		rt_button_visible = true
+		rt_button_text = "Private key"
 		primary_button_visible = true
 		primary_button_text = "Start"
 		secondary_button_visible = true
@@ -166,6 +166,9 @@ class MainStep:
 		modal.client.account_lock()
 		modal._address = ""
 		modal.current_step = "Welcome"
+
+	func _buttonrt_pressed():
+		get_parent().current_step = "PrivateKey"
 
 	func _buttonc1_pressed():
 		var modal = get_parent()
@@ -195,6 +198,58 @@ class MainStep:
 		edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		get_content_container().add_child(edit)
 		return edit
+
+
+class PrivateKeyStep:
+	extends WalletModalStep
+
+	var _private_key_edit: LineEdit = null
+
+	## Lets an unlocked-wallet user explicitly reveal the private key for
+	## migration to another wallet.
+	func _on_show() -> void:
+		clear_content()
+		_private_key_edit = null
+		lt_button_visible = true
+		lt_button_text = "Back"
+		rt_button_visible = false
+		primary_button_visible = true
+		primary_button_text = "Reveal"
+		secondary_button_visible = false
+		status = "Private key hidden."
+
+		_add_text("Reveal the private key only when you need to migrate this account to another wallet. Anyone with this value can control the account.")
+		_private_key_edit = LineEdit.new()
+		_private_key_edit.text = ""
+		_private_key_edit.placeholder_text = "Private key hidden"
+		_private_key_edit.editable = false
+		_private_key_edit.secret = true
+		_private_key_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		get_content_container().add_child(_private_key_edit)
+
+	func _buttonlt_pressed():
+		get_parent().current_step = "Main"
+
+	func _buttonc1_pressed():
+		if _private_key_edit == null:
+			return
+		status = "Retrieving private key..."
+		var response = get_parent().client.account_private_key()
+		if not response.get("ok", false):
+			status = "Private key retrieval failed: %s" % str(response.get("error", "unknown_error"))
+			return
+		_private_key_edit.secret = false
+		_private_key_edit.text = str(response.get("value", ""))
+		primary_button_visible = false
+		status = "Private key revealed."
+
+	func _add_text(text: String) -> Label:
+		var label := Label.new()
+		label.text = text
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		get_content_container().add_child(label)
+		return label
 
 
 class CreatingStep:
@@ -405,6 +460,10 @@ func _enter_tree() -> void:
 	main.name = "Main"
 	add_child(main)
 
+	var private_key := PrivateKeyStep.new()
+	private_key.name = "PrivateKey"
+	add_child(private_key)
+
 	var creating := CreatingStep.new()
 	creating.name = "Creating"
 	add_child(creating)
@@ -510,7 +569,11 @@ func _on_restore_file_selected(path: String) -> void:
 	step.status = "Restoring account..."
 	var response = client.account_restore(path)
 	if response.get("ok", false):
-		step.status = "Account restored. Unlock it to continue."
+		step.status = "Account restored or imported. Unlock it to continue."
 		current_step = "Welcome"
 	else:
-		step.status = "Restore failed: %s" % str(response.get("error", "unknown_error"))
+		var error := str(response.get("error", "unknown_error"))
+		if error == "invalid_private_key":
+			step.status = "Import failed: invalid private key."
+		else:
+			step.status = "Restore failed: %s" % error

@@ -22,6 +22,7 @@ use tiny_keccak::{Hasher, Keccak};
 
 const KEYSTORE_FILE: &str = "account.json";
 const STORAGE_DIR: &str = "user://AlephVault.EVM/native_wallet";
+const DEFAULT_IMPORTED_PRIVATE_KEY_PASSWORD: &str = "default";
 
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
@@ -414,14 +415,33 @@ impl AlephVaultEvmNativeWallet {
             return failed("invalid_state");
         }
         let source_path = globalize_path(&source_path.to_string());
-        if read_json_file(&source_path).is_err() {
-            return failed("invalid_backup");
-        }
         if fs::create_dir_all(&storage_dir).is_err() {
             return failed("os_error");
         }
-        if copy_file(&source_path, &keystore_path).is_err() {
-            return failed("os_error");
+
+        let Ok(contents) = fs::read_to_string(&source_path) else {
+            return failed("invalid_backup");
+        };
+        match restore_source_kind(&contents) {
+            RestoreSourceKind::EncryptedBackup => {
+                if copy_file(&source_path, &keystore_path).is_err() {
+                    return failed("os_error");
+                }
+            }
+            RestoreSourceKind::PrivateKey(wallet) => {
+                let mut rng = thread_rng();
+                let Ok((_wallet, _uuid)) = PrivateKeySigner::encrypt_keystore(
+                    &storage_dir,
+                    &mut rng,
+                    wallet.to_bytes().as_slice(),
+                    DEFAULT_IMPORTED_PRIVATE_KEY_PASSWORD.as_bytes(),
+                    Some(KEYSTORE_FILE),
+                ) else {
+                    return failed("crypto_error");
+                };
+            }
+            RestoreSourceKind::InvalidPrivateKey => return failed("invalid_private_key"),
+            RestoreSourceKind::InvalidBackup => return failed("invalid_backup"),
         }
         self.clear_unlocked_state();
         success(Value::Null)
@@ -505,6 +525,14 @@ impl AlephVaultEvmNativeWallet {
         }
         let _ = fs::remove_file(&backup_path);
         success(Value::Null)
+    }
+
+    #[func]
+    fn account_private_key(&self) -> Dictionary {
+        let Some(wallet) = self.wallet.as_ref() else {
+            return failed("invalid_state");
+        };
+        success(json!(format!("0x{}", hex::encode(wallet.to_bytes()))))
     }
 
     #[func]
@@ -1088,9 +1116,50 @@ fn globalize_path(path: &str) -> String {
         .to_string()
 }
 
-fn read_json_file(path: &str) -> Result<Value, ()> {
-    let contents = fs::read_to_string(path).map_err(|_| ())?;
-    serde_json::from_str(&contents).map_err(|_| ())
+enum RestoreSourceKind {
+    EncryptedBackup,
+    PrivateKey(PrivateKeySigner),
+    InvalidPrivateKey,
+    InvalidBackup,
+}
+
+fn restore_source_kind(contents: &str) -> RestoreSourceKind {
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return RestoreSourceKind::InvalidBackup;
+    }
+
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(object)) => {
+            if let Some(value) = object
+                .get("private_key")
+                .or_else(|| object.get("privateKey"))
+            {
+                return match value.as_str().and_then(private_key_signer_from_hex) {
+                    Some(wallet) => RestoreSourceKind::PrivateKey(wallet),
+                    None => RestoreSourceKind::InvalidPrivateKey,
+                };
+            }
+            RestoreSourceKind::EncryptedBackup
+        }
+        Ok(_) => RestoreSourceKind::InvalidBackup,
+        Err(_) if trimmed.starts_with("0x") => match private_key_signer_from_hex(trimmed) {
+            Some(wallet) => RestoreSourceKind::PrivateKey(wallet),
+            None => RestoreSourceKind::InvalidPrivateKey,
+        },
+        Err(_) => RestoreSourceKind::InvalidBackup,
+    }
+}
+
+fn private_key_signer_from_hex(value: &str) -> Option<PrivateKeySigner> {
+    if !value.starts_with("0x") {
+        return None;
+    }
+    let bytes = decode_hex_bytes(value)?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    Some(PrivateKeySigner::from_bytes(&B256::from_slice(&bytes)).ok()?)
 }
 
 fn copy_file(source: &str, target: &str) -> Result<(), ()> {

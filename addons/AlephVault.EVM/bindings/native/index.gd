@@ -276,6 +276,11 @@ func account_set_password(password: String):
 		return Async.failed("incomplete_binding")
 	return _wallet.account_set_password(password)
 
+func account_private_key():
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_private_key()
+
 func set_chain(rpc_url: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")

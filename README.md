@@ -196,18 +196,20 @@ client.account_backup(target_path)
 client.account_destroy()
 client.account_lock()
 client.account_set_password(password)
+client.account_private_key()
 client.set_chain(rpc_url)
 ```
 
 Native wallet notes:
 
 - Native bindings manage one encrypted local account.
-- Private keys never cross into GDScript.
+- Private keys only cross into GDScript when an unlocked wallet explicitly calls `account_private_key()`.
 - `account_create(password)` creates the encrypted account and leaves it locked.
-- `account_restore(source_path)` restores an encrypted backup and leaves it locked.
+- `account_restore(source_path)` restores an encrypted backup and leaves it locked. It can also import a plain unencrypted private-key file in exactly these formats: a text file containing `0x...`, JSON containing `{"private_key": "0x..."}`, or JSON containing `{"privateKey": "0x..."}`. Plain imports validate the private key and create the encrypted wallet with password `default`.
 - `account_unlock(password)` unlocks the wallet. Call `initialize()` afterwards.
 - `account_lock()` locks the wallet and clears the initialized binding state.
 - `account_set_password(password)` requires an unlocked wallet.
+- `account_private_key()` requires an unlocked wallet and returns the private key as `0x`-prefixed hex.
 - `set_chain(rpc_url)` accepts an HTTP(S) RPC URL and keeps the chain configuration in process memory.
 
 ### Contract Helpers

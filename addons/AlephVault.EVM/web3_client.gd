@@ -350,11 +350,11 @@ func _init():
 #     account_exists(), account_create(password), account_destroy(),
 #     account_backup(target_path), account_restore(source_path),
 #     account_unlock(password), account_lock(), account_set_password(password),
-#     and set_chain(rpc_url).
+#     account_private_key(), and set_chain(rpc_url).
 #     Web bindings return {"ok": false, "error": "not_supported"} for all of
 #     these methods. Native bindings support a single encrypted account whose
-#     private key never crosses into GDScript; only its address is returned by
-#     get_accounts() after unlock and initialize().
+#     private key only crosses into GDScript when account_private_key() is
+#     explicitly called while unlocked.
 #
 # --------- Contract-related methods ---------
 #
@@ -715,6 +715,11 @@ func account_lock():
 ## Web bindings return {"ok": false, "error": "not_supported"}.
 func account_set_password(password: String):
 	return _binding.account_set_password(password)
+
+## Returns the unlocked native wallet private key as 0x-prefixed hex.
+## Web bindings return {"ok": false, "error": "not_supported"}.
+func account_private_key():
+	return _binding.account_private_key()
 
 ## Sets the native wallet HTTP RPC URL and infers chain id from eth_chainId.
 ## The chain is transient and is not stored on disk. This is independent from

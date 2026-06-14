@@ -351,7 +351,8 @@ wallet_modal.started.connect(func(lock: Callable):
 The wallet modal contains these steps:
 
 - `Welcome`: detects whether the encrypted account exists. Existing accounts can be unlocked, backed up, or deleted. Missing accounts can be created or restored.
-- `Main`: shows the unlocked account address, never the private key. It can lock, start wallet initialization, or move to password change.
+- `Main`: shows the unlocked account address. It can lock, start wallet initialization, show the private-key reveal step, or move to password change.
+- `PrivateKey`: requires an unlocked wallet and reveals the private key only after the user presses Reveal.
 - `Creating`: creates the account using the password collected in Welcome, then returns to Welcome.
 - `Deleting`: requires typing a random 8-digit confirmation code before deleting the account.
 - `ChangingPassword`: changes the password, locks the wallet, and returns to Welcome.
@@ -367,10 +368,13 @@ account_backup(target_path)
 account_destroy()
 account_lock()
 account_set_password(password)
+account_private_key()
 initialize()
 get_accounts()
 ```
 
 Backup and restore use Godot `FileDialog` controls. Backup uses save-file mode; restore uses open-file mode.
+
+Restore accepts encrypted account backups. When the selected file is plain unencrypted text, it can also import a private key from exactly these formats: `0x...`, `{"private_key": "0x..."}`, or `{"privateKey": "0x..."}`. Plain imports validate the private key and create the encrypted wallet with password `default`.
 
 The wallet modal inherits all theme behavior from `Modal` and `ModalStep`, so assigning a theme to the wallet modal also styles its steps and internal controls through the same theme variations listed above.

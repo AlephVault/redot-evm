@@ -290,6 +290,9 @@ func account_lock():
 func account_set_password(_password: String):
 	return Async.failed("not_supported")
 
+func account_private_key():
+	return Async.failed("not_supported")
+
 func set_chain(_rpc_url: String):
 	return Async.failed("not_supported")
 
