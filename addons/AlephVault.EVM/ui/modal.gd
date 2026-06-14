@@ -21,6 +21,11 @@ func _ready() -> void:
 	_select_initial_step()
 
 
+func show_from_scratch() -> void:
+	show()
+	_select_initial_step()
+
+
 func _apply_default_layout() -> void:
 	anchor_left = 0.0
 	anchor_top = 0.0
@@ -52,6 +57,9 @@ func _apply_current_step() -> void:
 	for child in get_children():
 		if _is_modal_step(child):
 			child.visible = child == selected_step
+
+	if selected_step != null and selected_step.has_method("_on_show"):
+		selected_step._on_show()
 
 
 func _find_step(step_name: String) -> Control:

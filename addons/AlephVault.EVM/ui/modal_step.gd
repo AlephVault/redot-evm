@@ -127,6 +127,18 @@ func get_content_container() -> VBoxContainer:
 	return _content
 
 
+func clear_content() -> void:
+	_ensure_structure()
+	for child in _content.get_children():
+		_content.remove_child(child)
+		child.queue_free()
+
+
+## Override this one to refresh dynamic step contents each time it is shown.
+func _on_show() -> void:
+	pass
+
+
 func _ensure_structure() -> void:
 	if _root != null:
 		return
