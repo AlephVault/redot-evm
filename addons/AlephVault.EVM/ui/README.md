@@ -4,12 +4,14 @@ This directory provides two modal building blocks:
 
 - `modal.gd`: a wizard-style container that shows one modal step at a time.
 - `modal_step.gd`: a single responsive step with top buttons, scrollable content, status text, and bottom buttons.
+- `wallet_modal.gd`: a native-wallet account management modal built on top of `modal.gd` and `modal_step.gd`.
 
 The namespace entry point is:
 
 ```gdscript
 const Modal = AlephVault__EVM.UI.Modal
 const ModalStep = AlephVault__EVM.UI.ModalStep
+const WalletModal = AlephVault__EVM.UI.WalletModal
 ```
 
 ## Creating A Modal
@@ -311,3 +313,64 @@ Assign it to the modal:
 ```gdscript
 modal.theme = build_modal_theme()
 ```
+
+## WalletModal
+
+`wallet_modal.gd` implements the native wallet/account-management flow. It is intended for native builds, where `AlephVault__EVM.Web3Client` manages encrypted local wallet material. HTML5 builds should use the browser/EIP-1193 wallet directly.
+
+Instantiate it like any other `Control`:
+
+```gdscript
+var wallet_modal := AlephVault__EVM.UI.WalletModal.new()
+add_child(wallet_modal)
+wallet_modal.show_from_scratch()
+```
+
+By default it creates its own `AlephVault__EVM.Web3Client`. You can assign an existing client before `_ready()` if your application owns the client instance:
+
+```gdscript
+wallet_modal.client = my_web3_client
+```
+
+When the user unlocks and starts the wallet successfully, the modal emits:
+
+```gdscript
+signal started(lock: Callable)
+```
+
+The `lock` callable locks the native wallet and opens the modal again at the Welcome step:
+
+```gdscript
+wallet_modal.started.connect(func(lock: Callable):
+	# The wallet is initialized and ready for app use.
+	# Store this callable if the app later needs to force a wallet lock.
+	_current_wallet_lock = lock
+)
+```
+
+The wallet modal contains these steps:
+
+- `Welcome`: detects whether the encrypted account exists. Existing accounts can be unlocked, backed up, or deleted. Missing accounts can be created or restored.
+- `Main`: shows the unlocked account address, never the private key. It can lock, start wallet initialization, or move to password change.
+- `Creating`: creates the account using the password collected in Welcome, then returns to Welcome.
+- `Deleting`: requires typing a random 8-digit confirmation code before deleting the account.
+- `ChangingPassword`: changes the password, locks the wallet, and returns to Welcome.
+
+The flow uses these `Web3Client` methods:
+
+```gdscript
+account_exists()
+account_create(password)
+account_restore(source_path)
+account_unlock(password)
+account_backup(target_path)
+account_destroy()
+account_lock()
+account_set_password(password)
+initialize()
+get_accounts()
+```
+
+Backup and restore use Godot `FileDialog` controls. Backup uses save-file mode; restore uses open-file mode.
+
+The wallet modal inherits all theme behavior from `Modal` and `ModalStep`, so assigning a theme to the wallet modal also styles its steps and internal controls through the same theme variations listed above.
