@@ -132,6 +132,7 @@ func _ensure_structure() -> void:
 
 	_root = VBoxContainer.new()
 	_root.name = "Layout"
+	_root.theme_type_variation = "ModalLayout"
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -139,11 +140,13 @@ func _ensure_structure() -> void:
 
 	_top_buttons = HBoxContainer.new()
 	_top_buttons.name = "TopButtons"
+	_top_buttons.theme_type_variation = "ModalTopButtons"
 	_top_buttons.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_top_buttons)
 
 	_lt_button = Button.new()
 	_lt_button.name = "LeftTopButton"
+	_lt_button.theme_type_variation = "ModalTopButton"
 	_lt_button.pressed.connect(_buttonlt_pressed)
 	_top_buttons.add_child(_lt_button)
 
@@ -154,11 +157,13 @@ func _ensure_structure() -> void:
 
 	_rt_button = Button.new()
 	_rt_button.name = "RightTopButton"
+	_rt_button.theme_type_variation = "ModalTopButton"
 	_rt_button.pressed.connect(_buttonrt_pressed)
 	_top_buttons.add_child(_rt_button)
 
 	_scroll = ScrollContainer.new()
 	_scroll.name = "ContentScroll"
+	_scroll.theme_type_variation = "ModalContentScroll"
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -167,12 +172,14 @@ func _ensure_structure() -> void:
 
 	_content = VBoxContainer.new()
 	_content.name = "Content"
+	_content.theme_type_variation = "ModalContent"
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.add_child(_content)
 
 	_status_label = Label.new()
 	_status_label.name = "StatusLabel"
+	_status_label.theme_type_variation = "ModalStatusLabel"
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status_label.clip_text = false
 	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -180,17 +187,20 @@ func _ensure_structure() -> void:
 
 	_bottom_buttons = HBoxContainer.new()
 	_bottom_buttons.name = "BottomButtons"
+	_bottom_buttons.theme_type_variation = "ModalBottomButtons"
 	_bottom_buttons.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_bottom_buttons)
 
 	_primary_button = Button.new()
 	_primary_button.name = "PrimaryButton"
+	_primary_button.theme_type_variation = "ModalPrimaryButton"
 	_primary_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_primary_button.pressed.connect(_buttonc1_pressed)
 	_bottom_buttons.add_child(_primary_button)
 
 	_secondary_button = Button.new()
 	_secondary_button.name = "SecondaryButton"
+	_secondary_button.theme_type_variation = "ModalSecondaryButton"
 	_secondary_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_secondary_button.pressed.connect(_button_c2_pressed)
 	_bottom_buttons.add_child(_secondary_button)
