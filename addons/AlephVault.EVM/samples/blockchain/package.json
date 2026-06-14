@@ -1,0 +1,37 @@
+{
+  "name": "blockchain",
+  "version": "1.0.0",
+  "description": "A sample Hardhat project to interact with many contracts",
+  "keywords": [
+    "hardhat",
+    "redot",
+    "blockchain",
+    "sample"
+  ],
+  "homepage": "https://github.com/AlephVault/redot-evm#readme",
+  "bugs": {
+    "url": "https://github.com/AlephVault/redot-evm/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/AlephVault/redot-evm.git"
+  },
+  "license": "MIT",
+  "author": "Luis Masuelli",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "@openzeppelin/contracts": "^5.0.2",
+    "hardhat": "^2.26.0",
+    "hardhat-blueprints": "^1.4.0",
+    "hardhat-common-tools": "^1.7.2",
+    "hardhat-enquirer-plus": "^1.5.2",
+    "hardhat-ignition-deploy-everything": "^1.1.5",
+    "hardhat-method-prompts": "^1.4.0",
+    "hardhat-openzeppelin-common-blueprints": "^1.2.1"
+  }
+}
