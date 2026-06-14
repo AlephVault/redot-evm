@@ -333,6 +333,11 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    fn account_exists(&self) -> Dictionary {
+        success(json!(keystore_exists()))
+    }
+
+    #[func]
     fn account_create(&mut self, password: GString) -> Dictionary {
         if self.wallet.is_some() {
             return failed("invalid_state");

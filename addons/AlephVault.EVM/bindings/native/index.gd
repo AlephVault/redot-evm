@@ -230,6 +230,11 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return true
 
+func account_exists():
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.account_exists()
+
 func account_create(password: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")

@@ -266,6 +266,9 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return false
 
+func account_exists():
+	return Async.failed("not_supported")
+
 func account_create(_password: String):
 	return Async.failed("not_supported")
 

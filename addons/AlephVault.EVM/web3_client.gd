@@ -347,9 +347,10 @@ func _init():
 #     Returns true when the binding manages local wallet/account material.
 #
 # 30. Native wallet lifecycle methods:
-#     account_create(password), account_destroy(), account_backup(target_path),
-#     account_restore(source_path), account_unlock(password), account_lock(),
-#     account_set_password(password), and set_chain(rpc_url).
+#     account_exists(), account_create(password), account_destroy(),
+#     account_backup(target_path), account_restore(source_path),
+#     account_unlock(password), account_lock(), account_set_password(password),
+#     and set_chain(rpc_url).
 #     Web bindings return {"ok": false, "error": "not_supported"} for all of
 #     these methods. Native bindings support a single encrypted account whose
 #     private key never crosses into GDScript; only its address is returned by
@@ -674,6 +675,11 @@ func validate_address(value: String, checksum: bool = false):
 ## Returns whether this binding manages local wallet/account material.
 func manages_wallet() -> bool:
 	return _binding.manages_wallet()
+
+## Returns whether the native wallet keystore exists. Web bindings return
+## {"ok": false, "error": "not_supported"}.
+func account_exists():
+	return _binding.account_exists()
 
 ## Creates the native single-account wallet with password-protected storage.
 ## The wallet remains locked afterwards. Web bindings return not_supported.
