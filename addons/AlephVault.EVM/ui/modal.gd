@@ -8,6 +8,11 @@ const ModalStep = preload("./modal_step.gd")
 var _current_step := ""
 
 
+## The name of the currently visible step.
+##
+## This must match the node name of a child that inherits from ModalStep. If
+## the assigned value does not match any step, the modal falls back to the
+## first ModalStep child.
 @export var current_step := "":
 	get:
 		return _current_step
@@ -21,6 +26,10 @@ func _ready() -> void:
 	_select_initial_step()
 
 
+## Shows the modal and re-applies the initial step selection rules.
+##
+## Use this when opening the modal from a hidden state and wanting invalid or
+## empty current_step values to resolve to the first available ModalStep.
 func show_from_scratch() -> void:
 	show()
 	_select_initial_step()

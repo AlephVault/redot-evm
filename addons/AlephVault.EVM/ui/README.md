@@ -134,7 +134,7 @@ func _buttonrt_pressed():
 func _buttonc1_pressed():
 	pass
 
-func _button_c2_pressed():
+func _buttonc2_pressed():
 	pass
 ```
 

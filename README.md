@@ -1,51 +1,234 @@
-# redot-evm
-An implementation of EVM access in Redot, using a native implementation for non-web games, and using Metamask on web games.
+# Redot EVM
 
-## Client initialization
+`redot-evm` provides EVM wallet and RPC access for Redot/Godot projects.
 
-Create `AlephVault__EVM.Web3Client` and call `await client.initialize()` before
-using chain, account, balance, transfer, request, or contract methods.
-`initialize()` does not take a callback and returns `{"ok": true, "value":
-null}` on success. Use `get_accounts()` when you need the account list.
+The public entry point is:
 
-On native builds, the Rust wallet must already be unlocked and have an account
-and chain configured. The Godot binding caches the chain data and address
-returned by Rust, then the public `initialize()` call still resolves with
-`{"ok": true, "value": null}`. On web builds, initialization requests account
-access from the injected EIP-1193 wallet.
+```gdscript
+const EVM = AlephVault__EVM
+var client := EVM.Web3Client.new()
+```
 
-Use `client.manages_wallet()` to check whether the active binding manages local
-wallet/account material. Native bindings return `true`; web bindings return
-`false` because account material stays inside the browser wallet.
+The environment is detected automatically:
 
-Native wallet lifecycle:
+- HTML5/web builds use the web binding and an injected EIP-1193 browser wallet.
+- Native builds use the Rust GDExtension binding and its local encrypted wallet.
 
-- `account_create(password)` creates the single encrypted native account when
-  no account is configured. The wallet remains locked afterwards.
-- `account_restore(source_path)` restores an encrypted backup when no account
-  is configured. The wallet remains locked afterwards and must be unlocked with
-  the same password used by that keystore.
-- `account_destroy()`, `account_backup(target_path)`, and
-  `account_unlock(password)` require a configured but locked native account.
-- `account_lock()` and `account_set_password(password)` require an unlocked
-  native account. Locking also de-initializes the Godot binding cache.
-- `set_chain(rpc_url)` can be called in any native wallet state. It accepts an
-  HTTP(S) RPC URL, infers the chain id from `eth_chainId`, and keeps that chain
-  configuration only in process memory. Call it again after process restart
-  before native `initialize()`.
+You usually do not need to choose a binding manually. `Web3Client` checks `OS.has_feature("web")` and loads the correct implementation.
 
-Native wallets expose only one account address. Private keys are generated,
-encrypted, decrypted, and used for signing inside the Rust binding; GDScript
-wrappers never receive them. Backups copy the encrypted keystore itself, so the
-same password is required after restore. Web bindings return `not_supported`
-for every native wallet lifecycle method.
+## Building The Rust Extension
 
-## HTML5 exports
+The native binding lives in:
 
-For web exports, add `addons/AlephVault.EVM/templates/html5/web3-head-include.html`
-to the Web export preset's `Head Include` field, or copy it into a custom HTML
-shell before the Godot engine starts.
+```text
+addons/AlephVault.EVM/rust
+```
 
-The template initializes `window.web3 = new Web3(window.ethereum)` from an
-injected EIP-1193 wallet provider so the web binding can access it through
-Godot's `JavaScriptBridge`.
+Build the debug library used by the editor:
+
+```sh
+cd addons/AlephVault.EVM/rust
+cargo build
+```
+
+Build the release library:
+
+```sh
+cd addons/AlephVault.EVM/rust
+cargo build --release
+```
+
+The GDExtension manifest is:
+
+```text
+addons/AlephVault.EVM/AlephVault.EVM.gdextension
+```
+
+It maps platform targets to the Rust output files, for example:
+
+```text
+linux.debug.x86_64 = res://addons/AlephVault.EVM/rust/target/debug/libalephvault_evm_gdextension.so
+linux.release.x86_64 = res://addons/AlephVault.EVM/rust/target/release/libalephvault_evm_gdextension.so
+```
+
+Use `cargo check` for a fast Rust validation pass:
+
+```sh
+cd addons/AlephVault.EVM/rust
+cargo check
+```
+
+## HTML5 Setup
+
+For web exports, add this file to the Web export preset's `Head Include` field:
+
+```text
+addons/AlephVault.EVM/templates/html5/web3-head-include.html
+```
+
+The template initializes `window.web3` from the injected browser wallet provider before the Godot engine starts. The web binding then accesses it through `JavaScriptBridge`.
+
+## Basic Client Use
+
+Create a `Web3Client`, initialize it, then call the supported methods:
+
+```gdscript
+var client := AlephVault__EVM.Web3Client.new()
+var response = await client.initialize()
+if not response.get("ok", false):
+	push_error(str(response.get("error")))
+	return
+
+var accounts_response = await client.get_accounts()
+var accounts: Array = accounts_response.get("value", [])
+```
+
+All API methods return dictionaries in this shape:
+
+```gdscript
+{"ok": true, "value": ...}
+{"ok": false, "error": ...}
+```
+
+Some methods are asynchronous and should be called with `await`; synchronous methods can be called directly. When in doubt, using `await` on documented asynchronous methods keeps the call site explicit.
+
+## Native Pre-Initialize Wallet Flow
+
+Native builds require local wallet/account setup before `client.initialize()` can succeed. Use `AlephVault__EVM.UI.WalletModal` for that pre-initialize flow.
+
+See the UI documentation:
+
+[addons/AlephVault.EVM/ui/README.md](addons/AlephVault.EVM/ui/README.md)
+
+Minimal setup:
+
+```gdscript
+var wallet_modal := AlephVault__EVM.UI.WalletModal.new()
+wallet_modal.client = client
+add_child(wallet_modal)
+
+wallet_modal.started.connect(func(lock: Callable):
+	# client.initialize() already succeeded inside the modal.
+	# Store lock if the app needs to force the native wallet back to Welcome.
+	_native_wallet_lock = lock
+)
+
+if client.manages_wallet():
+	wallet_modal.show_from_scratch()
+else:
+	var response = await client.initialize()
+```
+
+`client.manages_wallet()` returns `true` for native bindings and `false` for web bindings.
+
+## Supported Web3Client Methods
+
+### Initialization And Accounts
+
+```gdscript
+await client.initialize()
+await client.get_chain_id()
+client.can_set_chain_id()
+await client.set_chain_id(chain_id)
+await client.get_accounts()
+client.accounts_changed
+client.chain_changed
+```
+
+`initialize()` requests account access on web. On native, the wallet must already be unlocked and configured, which is what `WalletModal` handles.
+
+### RPC, Balance, And Transfers
+
+```gdscript
+await client.get_balance(address)
+await client.transfer(address, amount, tx_config)
+await client.wait_for(tx_hash)
+await client.request(method, params)
+```
+
+`amount` is a decimal string denominated in wei. `tx_config` is a JSON-compatible dictionary. Common transaction keys include `from`, `value`, `gas`, `gasLimit`, `gasPrice`, `maxFeePerGas`, `maxPriorityFeePerGas`, `nonce`, `chainId`, `chain_id`, and `data`.
+
+### ABI Utilities
+
+```gdscript
+client.set_abi(key, abi)
+client.get_abi(key)
+client.abi_encode(args)
+client.abi_encode_packed(args)
+client.abi_decode(bytes, spec)
+```
+
+ABI argument arrays can contain plain values or dictionaries like:
+
+```gdscript
+{"type": "uint256", "value": "1000000000000000000"}
+```
+
+### Data Utilities
+
+```gdscript
+client.keccak256(bytes)
+client.from_wei(amount, unit)
+client.to_wei(amount, unit)
+client.from_hex(hex)
+client.to_checksum_address(address)
+client.to_hex(bytes)
+client.decimal_to_hex(decimal)
+client.hex_to_decimal(hex)
+client.validate_block_tag(tag)
+client.validate_uint(value, size)
+client.validate_int(value, size)
+client.validate_bytes(value, size)
+client.validate_address(value, checksum)
+```
+
+### Native Wallet Lifecycle
+
+These methods are intended for native bindings. Web bindings return `not_supported`.
+
+```gdscript
+client.manages_wallet()
+client.account_exists()
+client.account_create(password)
+client.account_restore(source_path)
+client.account_unlock(password)
+client.account_backup(target_path)
+client.account_destroy()
+client.account_lock()
+client.account_set_password(password)
+client.set_chain(rpc_url)
+```
+
+Native wallet notes:
+
+- Native bindings manage one encrypted local account.
+- Private keys never cross into GDScript.
+- `account_create(password)` creates the encrypted account and leaves it locked.
+- `account_restore(source_path)` restores an encrypted backup and leaves it locked.
+- `account_unlock(password)` unlocks the wallet. Call `initialize()` afterwards.
+- `account_lock()` locks the wallet and clears the initialized binding state.
+- `account_set_password(password)` requires an unlocked wallet.
+- `set_chain(rpc_url)` accepts an HTTP(S) RPC URL and keeps the chain configuration in process memory.
+
+### Contract Helpers
+
+```gdscript
+client.contract_create(address, abi_key)
+await client.contract_invoke(address, method, params, tx_params)
+client.contract_get_events(address, event, topics, from, to)
+client.contract_get_tx_events(tx_obj, event)
+```
+
+`method` and `event` can be a name or an ABI dictionary. Contract view calls may include `block` or `blockTag` in `tx_params`.
+
+## UI Components
+
+The UI namespace exposes:
+
+```gdscript
+AlephVault__EVM.UI.Modal
+AlephVault__EVM.UI.ModalStep
+AlephVault__EVM.UI.WalletModal
+```
+
+See [addons/AlephVault.EVM/ui/README.md](addons/AlephVault.EVM/ui/README.md) for modal step layout, theming, and `WalletModal` setup.

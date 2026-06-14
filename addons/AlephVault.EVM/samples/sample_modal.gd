@@ -53,7 +53,7 @@ class ConfirmStep:
 	func _buttonc1_pressed():
 		_move_to_next_step()
 
-	func _button_c2_pressed():
+	func _buttonc2_pressed():
 		_move_to_next_step()
 
 	func _move_to_next_step() -> void:

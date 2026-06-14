@@ -2,14 +2,34 @@
 extends PanelContainer
 
 
+## Initial inset applied to all four sides of this step.
+##
+## The step anchors itself to full rect, then applies this value as left/top
+## offsets and its negative value as right/bottom offsets.
 @export var _initial_margin := 16.0
+
+## Initial visibility of the top-left button.
 @export var _left_top_button_visible := true
+
+## Initial text of the top-left button.
 @export var _left_top_button_text := ""
+
+## Initial visibility of the top-right button.
 @export var _right_top_button_visible := true
+
+## Initial text of the top-right button.
 @export var _right_top_button_text := ""
+
+## Initial visibility of the primary bottom button.
 @export var _primary_button_visible := true
+
+## Initial text of the primary bottom button.
 @export var _primary_button_text := ""
+
+## Initial visibility of the secondary bottom button.
 @export var _secondary_button_visible := true
+
+## Initial text of the secondary bottom button.
 @export var _secondary_button_text := ""
 
 var _root: VBoxContainer = null
@@ -25,6 +45,9 @@ var _primary_button: Button = null
 var _secondary_button: Button = null
 
 
+## Runtime visibility of the top-left button.
+##
+## Reads and writes the internal Button directly.
 var lt_button_visible: bool:
 	get:
 		_ensure_structure()
@@ -34,6 +57,9 @@ var lt_button_visible: bool:
 		_lt_button.visible = value
 
 
+## Runtime visibility of the top-right button.
+##
+## Reads and writes the internal Button directly.
 var rt_button_visible: bool:
 	get:
 		_ensure_structure()
@@ -43,6 +69,9 @@ var rt_button_visible: bool:
 		_rt_button.visible = value
 
 
+## Runtime text of the top-left button.
+##
+## Reads and writes the internal Button directly.
 var lt_button_text: String:
 	get:
 		_ensure_structure()
@@ -52,6 +81,9 @@ var lt_button_text: String:
 		_lt_button.text = value
 
 
+## Runtime text of the top-right button.
+##
+## Reads and writes the internal Button directly.
 var rt_button_text: String:
 	get:
 		_ensure_structure()
@@ -61,6 +93,9 @@ var rt_button_text: String:
 		_rt_button.text = value
 
 
+## Runtime visibility of the primary bottom button.
+##
+## Reads and writes the internal Button directly.
 var primary_button_visible: bool:
 	get:
 		_ensure_structure()
@@ -70,6 +105,9 @@ var primary_button_visible: bool:
 		_primary_button.visible = value
 
 
+## Runtime text of the primary bottom button.
+##
+## Reads and writes the internal Button directly.
 var primary_button_text: String:
 	get:
 		_ensure_structure()
@@ -79,6 +117,9 @@ var primary_button_text: String:
 		_primary_button.text = value
 
 
+## Runtime visibility of the secondary bottom button.
+##
+## Reads and writes the internal Button directly.
 var secondary_button_visible: bool:
 	get:
 		_ensure_structure()
@@ -88,6 +129,9 @@ var secondary_button_visible: bool:
 		_secondary_button.visible = value
 
 
+## Runtime text of the secondary bottom button.
+##
+## Reads and writes the internal Button directly.
 var secondary_button_text: String:
 	get:
 		_ensure_structure()
@@ -97,6 +141,9 @@ var secondary_button_text: String:
 		_secondary_button.text = value
 
 
+## Runtime status label text.
+##
+## Reads and writes the internal Label directly.
 var status: String:
 	get:
 		_ensure_structure()
@@ -122,11 +169,20 @@ func _apply_default_layout() -> void:
 	offset_bottom = -_initial_margin
 
 
+## Returns the vertically scrollable content container.
+##
+## Add arbitrary child controls here when implementing a step. The content area
+## remains scrollable and is vertically centered when its contents are shorter
+## than the available viewport.
 func get_content_container() -> VBoxContainer:
 	_ensure_structure()
 	return _content
 
 
+## Removes all controls currently inside the scrollable content container.
+##
+## Useful from _on_show() when a step rebuilds dynamic content every time it is
+## selected.
 func clear_content() -> void:
 	_ensure_structure()
 	for child in _content.get_children():
@@ -232,7 +288,7 @@ func _ensure_structure() -> void:
 	_secondary_button.name = "SecondaryButton"
 	_secondary_button.theme_type_variation = "ModalSecondaryButton"
 	_secondary_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_secondary_button.pressed.connect(_button_c2_pressed)
+	_secondary_button.pressed.connect(_buttonc2_pressed)
 	_bottom_buttons.add_child(_secondary_button)
 
 	_apply_initial_button_values()
@@ -270,9 +326,5 @@ func _buttonc1_pressed():
 	pass
 
 ## Override this one to attend when the second main button is pressed.
-func _button_c2_pressed():
-	_buttonc2_pressed()
-
-## Deprecated compatibility hook. Override _button_c2_pressed instead.
 func _buttonc2_pressed():
 	pass

@@ -2,11 +2,20 @@
 extends "res://addons/AlephVault.EVM/ui/modal.gd"
 
 
+## Emitted after the native wallet has been unlocked and initialized.
+##
+## The lock callable locks the wallet and reopens this modal from the Welcome
+## step, allowing the application to return to the pre-initialized state.
 signal started(lock: Callable)
 
 const WalletModalStep = preload("./modal_step.gd")
 const Web3Client = preload("../web3_client.gd")
 
+## Web3 client controlled by this wallet modal.
+##
+## If left null, the modal creates a new Web3Client in _ready(). Assign an
+## existing client before _ready() when the application owns the client
+## instance and wants the modal to perform the native pre-initialize flow for it.
 var client = null
 var _pending_password := ""
 var _address := ""
@@ -22,6 +31,10 @@ class WelcomeStep:
 	var _create_password_edit: LineEdit = null
 	var _create_confirm_edit: LineEdit = null
 
+	## Rebuilds the Welcome UI according to native wallet availability.
+	##
+	## Existing wallets show unlock, backup, and delete actions. Missing wallets
+	## show create and restore actions.
 	func _on_show() -> void:
 		clear_content()
 		_password_edit = null
@@ -100,7 +113,7 @@ class WelcomeStep:
 		modal._pending_password = _create_password_edit.text
 		modal.current_step = "Creating"
 
-	func _button_c2_pressed():
+	func _buttonc2_pressed():
 		var modal = get_parent()
 		if _password_edit != null:
 			status = "Choose a backup destination."
@@ -129,6 +142,9 @@ class WelcomeStep:
 class MainStep:
 	extends WalletModalStep
 
+	## Shows the unlocked address and wallet startup actions.
+	##
+	## This step never displays or exposes a private key.
 	func _on_show() -> void:
 		clear_content()
 		lt_button_visible = true
@@ -161,7 +177,7 @@ class MainStep:
 		status = "Wallet initialized."
 		modal.started.emit(Callable(modal, "_lock_and_restart"))
 
-	func _button_c2_pressed():
+	func _buttonc2_pressed():
 		get_parent().current_step = "ChangingPassword"
 
 	func _add_text(text: String) -> Label:
@@ -184,6 +200,10 @@ class MainStep:
 class CreatingStep:
 	extends WalletModalStep
 
+	## Attempts account creation using the password collected in Welcome.
+	##
+	## On success, the modal returns to Welcome so the user can unlock the new
+	## account. On failure, this step shows an error and a Back button.
 	func _on_show() -> void:
 		clear_content()
 		lt_button_visible = false
@@ -226,6 +246,9 @@ class DeletingStep:
 	var _confirmation := ""
 	var _confirmation_edit: LineEdit = null
 
+	## Shows destructive account deletion confirmation.
+	##
+	## A random 8-digit code must be typed before the delete button is enabled.
 	func _on_show() -> void:
 		clear_content()
 		_confirmation_edit = null
@@ -303,6 +326,10 @@ class ChangingPasswordStep:
 	var _password_edit: LineEdit = null
 	var _confirm_edit: LineEdit = null
 
+	## Shows the password-change prompt for an unlocked native wallet.
+	##
+	## Successful changes lock the wallet and return to Welcome, where the new
+	## password must be used to unlock again.
 	func _on_show() -> void:
 		clear_content()
 		_password_edit = null
@@ -391,6 +418,10 @@ func _enter_tree() -> void:
 	add_child(changing_password)
 
 
+## Shows the wallet modal from the Welcome step with transient state cleared.
+##
+## Use this before native client.initialize() when client.manages_wallet()
+## returns true.
 func show_from_scratch() -> void:
 	_address = ""
 	_pending_password = ""
