@@ -5,3 +5,4 @@
 **/node_modules/
 addons/AlephVault.EVM/samples/blockchain/artifacts
 addons/AlephVault.EVM/samples/blockchain/cache
+addons/AlephVault.EVM/samples/blockchain/ignition/deployments/chain-31337
