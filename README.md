@@ -148,6 +148,24 @@ await client.request(method, params)
 
 `amount` is a decimal string denominated in wei. `tx_config` is a JSON-compatible dictionary. Common transaction keys include `from`, `value`, `gas`, `gasLimit`, `gasPrice`, `maxFeePerGas`, `maxPriorityFeePerGas`, `nonce`, `chainId`, `chain_id`, and `data`.
 
+### Signing And Verification
+
+```gdscript
+await client.personal_sign(message, address)
+await client.eth_sign_typed_data(typed_data, address)
+client.verify_personal_sign(address, message, signature)
+client.verify_eth_sign_typed_data(address, typed_data, signature)
+```
+
+`personal_sign()` and `eth_sign_typed_data()` are top-level helpers over `request()`. They do not add new binding methods for signing:
+
+- `personal_sign(message, address = "")` calls `personal_sign` with `[message, address]`.
+- `eth_sign_typed_data(typed_data, address = "")` calls `eth_signTypedData` with `[address, typed_data]`.
+
+If `address` is empty, the helper uses the first account returned by `get_accounts()`. `message` can be a `String` or `PackedByteArray`; byte arrays are encoded as `0x`-prefixed hex strings before signing or verification.
+
+Verification helpers are binding-backed and return `{"ok": true, "value": bool}`. `verify_personal_sign()` recovers the signer using the EIP-191/personal-sign message hash. `verify_eth_sign_typed_data()` recovers the signer using the EIP-712 typed-data hash. Web typed-data verification requires the included Web3 build to expose `web3.eth.accounts.recoverTypedSignature`; otherwise it returns `incomplete_binding`.
+
 ### ABI Utilities
 
 ```gdscript
