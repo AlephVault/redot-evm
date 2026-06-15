@@ -90,7 +90,7 @@ Each `ModalStep` creates this internal layout:
 3. A status `Label`.
 4. A bottom `HBoxContainer` with primary and secondary buttons.
 
-The step anchors itself to full rect and applies `_initial_margin` as the inset on every side. The default is `16`.
+Each step anchors itself to full rect inside the `Modal`. The `Modal` applies its exported `Initial Margin` as the outer inset around the whole modal. The default is `16`.
 
 Use `get_content_container()` to add arbitrary content to the scrollable area:
 
@@ -161,7 +161,7 @@ If a variation does not define an item, Godot falls back to the base type. For e
 
 ### Margins And Spacing
 
-The outer inset of each step is not a theme value. Configure it through the exported `_initial_margin` field on the `ModalStep`.
+The modal inset is not a theme value. Configure it through the exported `Initial Margin` field on the `Modal`.
 
 For spacing between vertically stacked groups, set the `separation` constant on `ModalLayout`, which is a `VBoxContainer` variation.
 
@@ -332,7 +332,7 @@ By default it creates its own `AlephVault__EVM.Web3Client`. You can assign an ex
 wallet_modal.client = my_web3_client
 ```
 
-If the native wallet must be initialized against a specific RPC endpoint, assign it before showing the modal. The modal will call `await client.set_chain(chain_rpc_url)` immediately before `client.initialize()`:
+If the native wallet must be initialized against a specific RPC endpoint, assign it before showing the modal. The modal will call `await client.set_chain(chain_rpc_url)` immediately before `await client.initialize()`:
 
 ```gdscript
 wallet_modal.chain_rpc_url = "http://127.0.0.1:8545"

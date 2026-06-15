@@ -35,5 +35,10 @@ reuse, method resolution, event decoding, and event filtering are handled in the
 JavaScript side so cached Web3 objects never need to cross the JavaScriptBridge
 boundary.
 
+The include also exposes `verifyPersonalSign` and `verifyTypedData` helpers
+used by `Web3Client.verify_personal_sign()` and
+`Web3Client.verify_eth_sign_typed_data()`. Typed-data verification depends on
+the bundled Web3 account helper `web3.eth.accounts.recoverTypedSignature`.
+
 For production builds, consider self-hosting the pinned `web3.min.js` asset
 instead of depending on the CDN at runtime.

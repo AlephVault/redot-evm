@@ -31,3 +31,4 @@ grow_vertical = 2
 theme = SubResource("Theme_tvbpo")
 script = ExtResource("1_7yl1e")
 _initial_margin = 64.0
+current_step = "Intro"
