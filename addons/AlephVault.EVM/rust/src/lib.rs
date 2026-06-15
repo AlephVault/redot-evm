@@ -19,11 +19,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::{
+    atomic::{AtomicI64, Ordering},
+    Mutex, OnceLock,
+};
+use std::thread;
 use tiny_keccak::{Hasher, Keccak};
 
 const KEYSTORE_FILE: &str = "account.json";
 const STORAGE_DIR: &str = "user://AlephVault.EVM/native_wallet";
 const DEFAULT_IMPORTED_PRIVATE_KEY_PASSWORD: &str = "default";
+
+static NEXT_WALLET_JOB_ID: AtomicI64 = AtomicI64::new(1);
+static WALLET_JOB_RESULTS: OnceLock<Mutex<HashMap<i64, WalletJobResult>>> = OnceLock::new();
 
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
@@ -36,6 +44,19 @@ struct AlephVaultEvmNativeWallet {
     wallet: Option<PrivateKeySigner>,
     abis: HashMap<String, String>,
     contracts: HashMap<String, String>,
+}
+
+enum WalletJobKind {
+    Create,
+    Backup,
+    Restore,
+    Unlock,
+    SetPassword,
+}
+
+struct WalletJobResult {
+    kind: WalletJobKind,
+    result: Result<Value, String>,
 }
 
 enum PreparedTx {
@@ -443,6 +464,40 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    fn account_create_async(&self, password: GString) -> Dictionary {
+        if self.wallet.is_some() {
+            return failed("invalid_state");
+        }
+        let password = password.to_string();
+        if password.is_empty() {
+            return failed("empty_password");
+        }
+        let storage_dir = storage_dir();
+        if keystore_exists() {
+            return failed("invalid_state");
+        }
+        success(json!(spawn_wallet_job(WalletJobKind::Create, move || {
+            if fs::create_dir_all(&storage_dir).is_err() {
+                return Err("os_error".to_owned());
+            }
+            let keystore_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
+            if keystore_path.exists() && fs::remove_file(&keystore_path).is_err() {
+                return Err("os_error".to_owned());
+            }
+            let mut rng = thread_rng();
+            let Ok((wallet, _uuid)) = PrivateKeySigner::new_keystore(
+                &storage_dir,
+                &mut rng,
+                password.as_bytes(),
+                Some(KEYSTORE_FILE),
+            ) else {
+                return Err("crypto_error".to_owned());
+            };
+            Ok(json!({"address": format_address(wallet.address())}))
+        })))
+    }
+
+    #[func]
     fn account_destroy(&mut self) -> Dictionary {
         if self.wallet.is_some() {
             return failed("invalid_state");
@@ -471,6 +526,23 @@ impl AlephVaultEvmNativeWallet {
             return failed("os_error");
         }
         success(Value::Null)
+    }
+
+    #[func]
+    fn account_backup_async(&self, target_path: GString) -> Dictionary {
+        if self.wallet.is_some() {
+            return failed("invalid_state");
+        }
+        let keystore_path = keystore_path();
+        if !Path::new(&keystore_path).exists() {
+            return failed("invalid_state");
+        }
+        let target_path = globalize_path(&target_path.to_string());
+        success(json!(spawn_wallet_job(WalletJobKind::Backup, move || {
+            copy_file(&keystore_path, &target_path)
+                .map(|_| Value::Null)
+                .map_err(|_| "os_error".to_owned())
+        })))
     }
 
     #[func]
@@ -517,6 +589,45 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    fn account_restore_async(&self, source_path: GString) -> Dictionary {
+        if self.wallet.is_some() {
+            return failed("invalid_state");
+        }
+        let storage_dir = storage_dir();
+        let keystore_path = keystore_path();
+        if Path::new(&keystore_path).exists() {
+            return failed("invalid_state");
+        }
+        let source_path = globalize_path(&source_path.to_string());
+        success(json!(spawn_wallet_job(WalletJobKind::Restore, move || {
+            if fs::create_dir_all(&storage_dir).is_err() {
+                return Err("os_error".to_owned());
+            }
+            let contents =
+                fs::read_to_string(&source_path).map_err(|_| "invalid_backup".to_owned())?;
+            match restore_source_kind(&contents) {
+                RestoreSourceKind::EncryptedBackup => copy_file(&source_path, &keystore_path)
+                    .map(|_| Value::Null)
+                    .map_err(|_| "os_error".to_owned()),
+                RestoreSourceKind::PrivateKey(wallet) => {
+                    let mut rng = thread_rng();
+                    PrivateKeySigner::encrypt_keystore(
+                        &storage_dir,
+                        &mut rng,
+                        wallet.to_bytes().as_slice(),
+                        DEFAULT_IMPORTED_PRIVATE_KEY_PASSWORD.as_bytes(),
+                        Some(KEYSTORE_FILE),
+                    )
+                    .map(|_| Value::Null)
+                    .map_err(|_| "crypto_error".to_owned())
+                }
+                RestoreSourceKind::InvalidPrivateKey => Err("invalid_private_key".to_owned()),
+                RestoreSourceKind::InvalidBackup => Err("invalid_backup".to_owned()),
+            }
+        })))
+    }
+
+    #[func]
     fn account_unlock(&mut self, password: GString) -> Dictionary {
         if self.wallet.is_some() {
             return failed("invalid_state");
@@ -535,6 +646,26 @@ impl AlephVaultEvmNativeWallet {
         self.accounts = vec![address.clone()];
         self.ready = false;
         success(json!(address))
+    }
+
+    #[func]
+    fn account_unlock_async(&self, password: GString) -> Dictionary {
+        if self.wallet.is_some() {
+            return failed("invalid_state");
+        }
+        let keystore_path = keystore_path();
+        if !Path::new(&keystore_path).exists() {
+            return failed("invalid_state");
+        }
+        let password = password.to_string();
+        success(json!(spawn_wallet_job(WalletJobKind::Unlock, move || {
+            let wallet = PrivateKeySigner::decrypt_keystore(&keystore_path, password.as_bytes())
+                .map_err(|_| "invalid_password".to_owned())?;
+            Ok(json!({
+                "address": format_address(wallet.address()),
+                "private_key": format!("0x{}", hex::encode(wallet.to_bytes())),
+            }))
+        })))
     }
 
     #[func]
@@ -594,6 +725,85 @@ impl AlephVaultEvmNativeWallet {
         }
         let _ = fs::remove_file(&backup_path);
         success(Value::Null)
+    }
+
+    #[func]
+    fn account_set_password_async(&self, password: GString) -> Dictionary {
+        if self.wallet.is_none() {
+            return failed("invalid_state");
+        }
+        let password = password.to_string();
+        if password.is_empty() {
+            return failed("empty_password");
+        }
+        let storage_dir = storage_dir();
+        let final_path = Path::new(&storage_dir).join(KEYSTORE_FILE);
+        if !final_path.exists() {
+            return failed("invalid_state");
+        }
+        let Some(wallet) = self.wallet.as_ref() else {
+            return failed("invalid_state");
+        };
+        let wallet_bytes = wallet.to_bytes().to_vec();
+        success(json!(spawn_wallet_job(
+            WalletJobKind::SetPassword,
+            move || {
+                if fs::create_dir_all(&storage_dir).is_err() {
+                    return Err("os_error".to_owned());
+                }
+                let mut rng = thread_rng();
+                let new_name = "account-new.json";
+                let new_path = Path::new(&storage_dir).join(new_name);
+                let backup_path = Path::new(&storage_dir).join("account-old.json");
+                if new_path.exists() {
+                    let _ = fs::remove_file(&new_path);
+                }
+                if backup_path.exists() {
+                    let _ = fs::remove_file(&backup_path);
+                }
+                PrivateKeySigner::encrypt_keystore(
+                    &storage_dir,
+                    &mut rng,
+                    wallet_bytes.as_slice(),
+                    password.as_bytes(),
+                    Some(new_name),
+                )
+                .map_err(|_| "crypto_error".to_owned())?;
+                if fs::rename(&final_path, &backup_path).is_err() {
+                    return Err("os_error".to_owned());
+                }
+                if fs::rename(&new_path, &final_path).is_err() {
+                    let _ = fs::rename(&backup_path, &final_path);
+                    return Err("os_error".to_owned());
+                }
+                let _ = fs::remove_file(&backup_path);
+                Ok(Value::Null)
+            }
+        )))
+    }
+
+    #[func]
+    fn poll_wallet_job(&mut self, job_id: i64) -> Dictionary {
+        let Some(job) = wallet_job_results()
+            .lock()
+            .ok()
+            .and_then(|mut jobs| jobs.remove(&job_id))
+        else {
+            let mut dictionary = Dictionary::new();
+            dictionary.set("ok", true);
+            dictionary.set("done", false);
+            return dictionary;
+        };
+
+        let response = match job.result {
+            Ok(value) => self.apply_wallet_job(job.kind, value),
+            Err(error) => failed(&error),
+        };
+        let mut dictionary = Dictionary::new();
+        dictionary.set("ok", true);
+        dictionary.set("done", true);
+        dictionary.set("response", response);
+        dictionary
     }
 
     #[func]
@@ -1150,6 +1360,38 @@ impl AlephVaultEvmNativeWallet {
         serde_json::from_str::<JsonAbi>(abi_json).ok()
     }
 
+    fn apply_wallet_job(&mut self, kind: WalletJobKind, value: Value) -> Dictionary {
+        match kind {
+            WalletJobKind::Create => {
+                self.clear_unlocked_state();
+                success(value.get("address").cloned().unwrap_or(Value::Null))
+            }
+            WalletJobKind::Backup => success(Value::Null),
+            WalletJobKind::Restore => {
+                self.clear_unlocked_state();
+                success(Value::Null)
+            }
+            WalletJobKind::Unlock => {
+                let Some(private_key) = value.get("private_key").and_then(Value::as_str) else {
+                    return failed("crypto_error");
+                };
+                let Some(wallet) = private_key_signer_from_hex(private_key) else {
+                    return failed("crypto_error");
+                };
+                let address = value
+                    .get("address")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format_address(wallet.address()));
+                self.wallet = Some(wallet);
+                self.accounts = vec![address.clone()];
+                self.ready = false;
+                success(json!(address))
+            }
+            WalletJobKind::SetPassword => success(Value::Null),
+        }
+    }
+
     fn clear_unlocked_state(&mut self) {
         self.ready = false;
         self.accounts.clear();
@@ -1253,6 +1495,24 @@ fn copy_file(source: &str, target: &str) -> Result<(), ()> {
     }
     fs::copy(source, target).map_err(|_| ())?;
     Ok(())
+}
+
+fn wallet_job_results() -> &'static Mutex<HashMap<i64, WalletJobResult>> {
+    WALLET_JOB_RESULTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn spawn_wallet_job<F>(kind: WalletJobKind, work: F) -> i64
+where
+    F: FnOnce() -> Result<Value, String> + Send + 'static,
+{
+    let job_id = NEXT_WALLET_JOB_ID.fetch_add(1, Ordering::Relaxed);
+    thread::spawn(move || {
+        let result = work();
+        if let Ok(mut jobs) = wallet_job_results().lock() {
+            jobs.insert(job_id, WalletJobResult { kind, result });
+        }
+    });
+    job_id
 }
 
 // Rationale: non-wallet JSON-RPC calls are intentionally thin pass-throughs so

@@ -96,7 +96,7 @@ class WelcomeStep:
 		var modal = get_parent()
 		if _password_edit != null:
 			status = "Unlocking account..."
-			var response = modal.client.account_unlock(_password_edit.text)
+			var response = await modal.client.account_unlock(_password_edit.text)
 			if not response.get("ok", false):
 				status = "Unlock failed: %s" % str(response.get("error", "unknown_error"))
 				return
@@ -277,7 +277,7 @@ class CreatingStep:
 
 	func _create_account() -> void:
 		var modal = get_parent()
-		var response = modal.client.account_create(modal._pending_password)
+		var response = await modal.client.account_create(modal._pending_password)
 		modal._pending_password = ""
 		if not response.get("ok", false):
 			clear_content()
@@ -421,7 +421,7 @@ class ChangingPasswordStep:
 
 		status = "Changing password..."
 		var modal = get_parent()
-		var response = modal.client.account_set_password(_password_edit.text)
+		var response = await modal.client.account_set_password(_password_edit.text)
 		if not response.get("ok", false):
 			status = "Password change failed: %s" % str(response.get("error", "unknown_error"))
 			return
@@ -560,7 +560,7 @@ func _on_backup_file_selected(path: String) -> void:
 	if step == null:
 		return
 	step.status = "Creating backup..."
-	var response = client.account_backup(path)
+	var response = await client.account_backup(path)
 	if response.get("ok", false):
 		step.status = "Backup created."
 	else:
@@ -573,7 +573,7 @@ func _on_restore_file_selected(path: String) -> void:
 	if step == null:
 		return
 	step.status = "Restoring account..."
-	var response = client.account_restore(path)
+	var response = await client.account_restore(path)
 	if response.get("ok", false):
 		step.status = "Account restored or imported. Unlock it to continue."
 		current_step = "Welcome"

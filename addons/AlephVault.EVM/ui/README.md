@@ -367,16 +367,16 @@ The flow uses these `Web3Client` methods:
 
 ```gdscript
 account_exists()
-account_create(password)
-account_restore(source_path)
-account_unlock(password)
-account_backup(target_path)
+await account_create(password)
+await account_restore(source_path)
+await account_unlock(password)
+await account_backup(target_path)
 account_destroy()
 account_lock()
-account_set_password(password)
+await account_set_password(password)
 account_private_key()
-initialize()
-get_accounts()
+await initialize()
+await get_accounts()
 ```
 
 Backup and restore use Godot `FileDialog` controls. Backup uses save-file mode; restore uses open-file mode.

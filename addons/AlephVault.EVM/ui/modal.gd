@@ -1,4 +1,3 @@
-@tool
 extends Control
 
 
@@ -9,7 +8,15 @@ const ModalStep = preload("./modal_step.gd")
 ##
 ## The step anchors itself to full rect, then applies this value as left/top
 ## offsets and its negative value as right/bottom offsets.
-@export var _initial_margin: float = 16.0
+var _initial_margin_value := 16.0
+
+@export var _initial_margin: float = 16.0:
+	get:
+		return _initial_margin_value
+	set(value):
+		_initial_margin_value = value
+		if is_inside_tree():
+			_apply_default_layout()
 
 
 var _current_step := ""

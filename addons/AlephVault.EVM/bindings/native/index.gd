@@ -250,7 +250,7 @@ func account_exists():
 func account_create(password: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.account_create(password)
+	return await _await_wallet_job(_wallet.account_create_async(password))
 
 func account_destroy():
 	if _wallet == null:
@@ -263,17 +263,17 @@ func account_destroy():
 func account_backup(target_path: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.account_backup(target_path)
+	return await _await_wallet_job(_wallet.account_backup_async(target_path))
 
 func account_restore(source_path: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.account_restore(source_path)
+	return await _await_wallet_job(_wallet.account_restore_async(source_path))
 
 func account_unlock(password: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.account_unlock(password)
+	return await _await_wallet_job(_wallet.account_unlock_async(password))
 
 func account_lock():
 	if _wallet == null:
@@ -286,7 +286,7 @@ func account_lock():
 func account_set_password(password: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.account_set_password(password)
+	return await _await_wallet_job(_wallet.account_set_password_async(password))
 
 func account_private_key():
 	if _wallet == null:
@@ -395,6 +395,26 @@ func _clear_ready_state():
 	_config = {}
 	_accounts = []
 	_chain_id = 0
+
+func _await_wallet_job(start_response: Dictionary):
+	if not start_response.get("ok", false):
+		return start_response
+	var job_id := int(start_response.get("value", 0))
+	if job_id <= 0:
+		return Async.failed("incomplete_binding")
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return Async.failed("incomplete_binding")
+	while true:
+		var poll_response = _wallet.poll_wallet_job(job_id)
+		if not poll_response.get("ok", false):
+			return poll_response
+		if bool(poll_response.get("done", false)):
+			var response = poll_response.get("response")
+			if response is Dictionary:
+				return response
+			return Async.failed("incomplete_binding")
+		await tree.process_frame
 
 func _strip_optional_0x(hex: String) -> String:
 	if hex.begins_with("0x"):

@@ -250,13 +250,13 @@ These methods are intended for native bindings. Web bindings return `not_support
 ```gdscript
 client.manages_wallet()
 client.account_exists()
-client.account_create(password)
-client.account_restore(source_path)
-client.account_unlock(password)
-client.account_backup(target_path)
+await client.account_create(password)
+await client.account_restore(source_path)
+await client.account_unlock(password)
+await client.account_backup(target_path)
 client.account_destroy()
 client.account_lock()
-client.account_set_password(password)
+await client.account_set_password(password)
 client.account_private_key()
 await client.set_chain(rpc_url)
 ```

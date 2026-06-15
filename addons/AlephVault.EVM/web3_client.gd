@@ -363,10 +363,11 @@ func _init():
 #     Returns true when the binding manages local wallet/account material.
 #
 # 32. Native wallet lifecycle methods:
-#     account_exists(), account_create(password), account_destroy(),
-#     account_backup(target_path), account_restore(source_path),
-#     account_unlock(password), account_lock(), account_set_password(password),
-#     account_private_key(), and set_chain(rpc_url).
+#     account_exists(), await account_create(password), account_destroy(),
+#     await account_backup(target_path), await account_restore(source_path),
+#     await account_unlock(password), account_lock(),
+#     await account_set_password(password), account_private_key(), and
+#     await set_chain(rpc_url).
 #     Web bindings return {"ok": false, "error": "not_supported"} for all of
 #     these methods. Native bindings support a single encrypted account whose
 #     private key only crosses into GDScript when account_private_key() is
@@ -745,7 +746,7 @@ func account_exists():
 ## Creates the native single-account wallet with password-protected storage.
 ## The wallet remains locked afterwards. Web bindings return not_supported.
 func account_create(password: String):
-	return _binding.account_create(password)
+	return await _binding.account_create(password)
 
 ## Destroys the native wallet while it is locked.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
@@ -755,17 +756,17 @@ func account_destroy():
 ## Copies the encrypted native keystore to target_path while locked.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
 func account_backup(target_path: String):
-	return _binding.account_backup(target_path)
+	return await _binding.account_backup(target_path)
 
 ## Restores an encrypted native keystore from source_path when unset.
 ## The wallet remains locked afterwards. Web bindings return not_supported.
 func account_restore(source_path: String):
-	return _binding.account_restore(source_path)
+	return await _binding.account_restore(source_path)
 
 ## Unlocks the native wallet with its password. Call initialize() afterwards to
 ## initialize the Godot binding cache. Web bindings return not_supported.
 func account_unlock(password: String):
-	return _binding.account_unlock(password)
+	return await _binding.account_unlock(password)
 
 ## Locks the native wallet and de-initializes the Godot binding cache.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
@@ -775,7 +776,7 @@ func account_lock():
 ## Changes the native wallet password while unlocked.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
 func account_set_password(password: String):
-	return _binding.account_set_password(password)
+	return await _binding.account_set_password(password)
 
 ## Returns the unlocked native wallet private key as 0x-prefixed hex.
 ## Web bindings return {"ok": false, "error": "not_supported"}.
