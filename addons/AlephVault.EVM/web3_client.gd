@@ -454,12 +454,12 @@ func _init():
 ##   {"ok": true, "value": null}; use get_accounts() and get_chain_id() for
 ##   the initialized address and chain.
 func initialize():
-	return _binding.initialize()
+	return await _binding.initialize()
 
 ## Returns the chain id for this binding. Web bindings can observe wallet-side
 ## chain changes. Native bindings are initialized with one fixed chain.
 func get_chain_id():
-	return _binding.get_chain_id()
+	return await _binding.get_chain_id()
 
 ## Returns whether this binding can switch chain ids at runtime.
 ##
@@ -472,14 +472,14 @@ func can_set_chain_id() -> bool:
 ## switch. Native bindings keep this method only for compatibility and return
 ## {"ok": false, "error": "not_supported"} after initialization.
 func set_chain_id(chain_id: int):
-	return _binding.set_chain_id(chain_id)
+	return await _binding.set_chain_id(chain_id)
 
 ## Gets the accounts for this binding. For simplicity, accounts
 ## can only be retrieved by this interface, but they can however
 ## be changed by external interfaces (in the case of EIP-1193
 ## wallets).
 func get_accounts():
-	return _binding.get_accounts()
+	return await _binding.get_accounts()
 
 ## A signal accounts_changed(accounts: Array[String]) to track
 ## when the accounts were changed by an external interface (most
@@ -503,7 +503,7 @@ var chain_changed:
 ## In the end, this involves a call to eth_getBalance RPC
 ## method.
 func get_balance(address: String):
-	return _binding.get_balance(address)
+	return await _binding.get_balance(address)
 
 ## Transfers wei to a valid non-zero EVM address.
 ##
@@ -516,19 +516,19 @@ func get_balance(address: String):
 ## from address and amount, so callers should not rely on conflicting
 ## tx_config values for those keys.
 func transfer(address: String, amount: String, tx_config: Dictionary):
-	return _binding.transfer(address, amount, tx_config)
+	return await _binding.transfer(address, amount, tx_config)
 
 ## Waits for a transaction. Returns either the transaction's
 ## result or the revert details.
 func wait_for(tx_hash: String):
-	return _binding.wait_for(tx_hash)
+	return await _binding.wait_for(tx_hash)
 
 ## Performs an arbitrary RPC, supported by the underlying binding
 ## or the underlying node. Certain requests are handled only by
 ## the binding, while the huge majority are forwarded to the node
 ## the binding is connected to.
 func request(method: String, params: Array):
-	return _binding.request(method, params)
+	return await _binding.request(method, params)
 
 ## Requests a personal_sign signature from the selected wallet/provider.
 ##
@@ -782,12 +782,12 @@ func account_set_password(password: String):
 func account_private_key():
 	return _binding.account_private_key()
 
-## Sets the native wallet HTTP RPC URL and infers chain id from eth_chainId.
+## Asynchronously sets the native wallet HTTP RPC URL and infers chain id from eth_chainId.
 ## The chain is transient and is not stored on disk. This is independent from
 ## set_chain_id(); call it again after process restart. Web bindings return
 ## not_supported.
 func set_chain(rpc_url: String):
-	return _binding.set_chain(rpc_url)
+	return await _binding.set_chain(rpc_url)
 
 # --------- Contract-related methods ---------
 
@@ -806,7 +806,7 @@ func contract_create(address: String, abi_key: String):
 ## as transfer()'s tx_config. Contract view/pure calls may also pass "block"
 ## or "blockTag".
 func contract_invoke(address: String, method: Variant, params: Array, tx_params: Dictionary):
-	return _binding.contract_invoke(address, method, params, tx_params)
+	return await _binding.contract_invoke(address, method, params, tx_params)
 
 ## Gets ABI-decoded events for a registered contract.
 ##
@@ -814,7 +814,7 @@ func contract_invoke(address: String, method: Variant, params: Array, tx_params:
 ## array of up to three topic values, or a dictionary keyed by indexed field
 ## names. Block tags follow validate_block_tag(tag).
 func contract_get_events(address: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
-	return _binding.contract_get_events(address, event, topics, from, to)
+	return await _binding.contract_get_events(address, event, topics, from, to)
 
 ## Decodes matching events from a transaction object returned by wait_for().
 ##
