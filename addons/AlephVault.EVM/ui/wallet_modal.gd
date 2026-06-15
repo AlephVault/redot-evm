@@ -17,6 +17,7 @@ const Web3Client = preload("../web3_client.gd")
 ## existing client before _ready() when the application owns the client
 ## instance and wants the modal to perform the native pre-initialize flow for it.
 var client = null
+var chain_rpc_url := ""
 var _pending_password := ""
 var _address := ""
 var _backup_dialog: FileDialog = null
@@ -173,6 +174,11 @@ class MainStep:
 	func _buttonc1_pressed():
 		var modal = get_parent()
 		status = "Initializing wallet..."
+		if not modal.chain_rpc_url.is_empty():
+			var chain_response = await modal.client.set_chain(modal.chain_rpc_url)
+			if not chain_response.get("ok", false):
+				status = "Chain setup failed: %s" % str(chain_response.get("error", "unknown_error"))
+				return
 		var response = await modal.client.initialize()
 		if not response.get("ok", false):
 			status = "Initialization failed: %s" % str(response.get("error", "unknown_error"))

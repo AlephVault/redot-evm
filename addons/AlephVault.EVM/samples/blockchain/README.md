@@ -352,3 +352,19 @@ And it's ABI is:
   }
 ]
 ```
+
+To make tests, you can open a console:
+
+```shell
+npx hardhat console --network localhost
+```
+
+and then:
+
+```js
+const contract = await hre.ignition.getDeployedContract("MyERC20#MyERC20");
+await contract.mint("0xTheAddress", "1000000000000000000");
+await hre.common.transfer("0xa2295C55A13B7439070069B5F62D4c3178218f63", {value: "1000000000000000000"});
+```
+
+where 0xTheAddress is the address of the account created in the temporary wallet.

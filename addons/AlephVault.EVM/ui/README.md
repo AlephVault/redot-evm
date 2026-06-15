@@ -332,6 +332,12 @@ By default it creates its own `AlephVault__EVM.Web3Client`. You can assign an ex
 wallet_modal.client = my_web3_client
 ```
 
+If the native wallet must be initialized against a specific RPC endpoint, assign it before showing the modal. The modal will call `await client.set_chain(chain_rpc_url)` immediately before `client.initialize()`:
+
+```gdscript
+wallet_modal.chain_rpc_url = "http://127.0.0.1:8545"
+```
+
 When the user unlocks and starts the wallet successfully, the modal emits:
 
 ```gdscript

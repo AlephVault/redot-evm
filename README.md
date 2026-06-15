@@ -141,11 +141,11 @@ Use the values from your Hardhat project README to update these constants at the
 const HARDHAT_RPC_URL := "http://127.0.0.1:8545"
 const DEV_ACCOUNT_ADDRESS := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 const DEV_ACCOUNT_PRIVATE_KEY := "0xac0974..."
-const SMPL_CONTRACT_ADDRESS := "0x..."
+const SMPL_CONTRACT_ADDRESS := "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 const SMPL_ABI: Array[Dictionary] = [...]
 ```
 
-`SMPL_ABI` is initialized with a minimal ERC-20 style ABI for `balanceOf`, `transfer`, and `Transfer`. If your Hardhat contract exposes those same entries, only `SMPL_CONTRACT_ADDRESS` needs to change. If your contract names or event signatures differ, replace `SMPL_ABI` with the ABI from your deployment output.
+`SMPL_CONTRACT_ADDRESS` matches the address documented by the included sample Hardhat project. `SMPL_ABI` is initialized with a minimal ERC-20 style ABI for `balanceOf`, `transfer`, and `Transfer`. If your deployment address changes, update `SMPL_CONTRACT_ADDRESS`. If your contract names or event signatures differ, replace `SMPL_ABI` with the ABI from your deployment output.
 
 The sample UI includes:
 

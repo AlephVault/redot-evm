@@ -7,7 +7,7 @@ const Web3Client = AlephVault__EVM.Web3Client
 const HARDHAT_RPC_URL := "http://127.0.0.1:8545"
 const DEV_ACCOUNT_ADDRESS := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 const DEV_ACCOUNT_PRIVATE_KEY := "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-const SMPL_CONTRACT_ADDRESS := "0x0000000000000000000000000000000000000000"
+const SMPL_CONTRACT_ADDRESS := "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 const SMPL_ABI_KEY := "SMPL"
 const SMPL_ABI: Array[Dictionary] = [
 	{
@@ -42,6 +42,7 @@ var _native_lock: Callable
 var _account := ""
 var _chain_id := 0
 var _last_event_block := 0
+var _contract_ready := false
 
 var _app_root: VBoxContainer
 var _status_label: Label
@@ -94,6 +95,7 @@ func _start_native() -> void:
 
 	_wallet_modal = WalletModal.new()
 	_wallet_modal.client = _client
+	_wallet_modal.chain_rpc_url = HARDHAT_RPC_URL
 	_wallet_modal.started.connect(_on_native_wallet_started)
 	add_child(_wallet_modal)
 	_status("Unlock or import the native wallet.")
@@ -135,10 +137,13 @@ func _show_app() -> void:
 		return
 	var contract_response = _client.contract_create(SMPL_CONTRACT_ADDRESS, SMPL_ABI_KEY)
 	if not contract_response.get("ok", false):
+		_contract_ready = false
 		_status("Contract setup failed: %s" % str(contract_response.get("error", "unknown_error")))
 		_log("Set SMPL_CONTRACT_ADDRESS to your deployed contract address.")
 		return
 
+	_contract_ready = true
+	_log("Registered SMPL contract %s with ABI key %s." % [SMPL_CONTRACT_ADDRESS, SMPL_ABI_KEY])
 	_status("Ready.")
 	await _refresh_balances()
 	_start_event_polling()
@@ -150,6 +155,7 @@ func _lock_native_wallet() -> void:
 	_stop_event_polling()
 	_app_root.visible = false
 	_account = ""
+	_contract_ready = false
 	_status("Wallet locked.")
 	_native_lock.call()
 
@@ -169,6 +175,8 @@ func _query_eth_balance() -> void:
 
 
 func _query_smpl_balance() -> void:
+	if not _ensure_contract_ready():
+		return
 	var address := _balance_address_edit.text.strip_edges()
 	var response = await _client.contract_invoke(SMPL_CONTRACT_ADDRESS, "balanceOf", [address], {})
 	if response.get("ok", false):
@@ -192,6 +200,8 @@ func _transfer_eth() -> void:
 
 
 func _transfer_smpl() -> void:
+	if not _ensure_contract_ready():
+		return
 	var to := _smpl_to_edit.text.strip_edges()
 	var amount := _smpl_amount_edit.text.strip_edges()
 	_status("Sending SMPL...")
@@ -302,7 +312,7 @@ func _stop_event_polling() -> void:
 
 
 func _poll_events() -> void:
-	if _account.is_empty():
+	if _account.is_empty() or not _contract_ready:
 		return
 	var latest_response = await _client.request("eth_blockNumber", [])
 	if not latest_response.get("ok", false):
@@ -327,6 +337,14 @@ func _poll_events() -> void:
 		_last_event_block = latest + 1
 	else:
 		_log("Event poll failed: %s" % str(events.get("error", "unknown_error")))
+
+
+func _ensure_contract_ready() -> bool:
+	if _contract_ready:
+		return true
+	_status("SMPL contract is not registered.")
+	_log("Check SMPL_CONTRACT_ADDRESS and SMPL_ABI_KEY in hardhat_sample.gd.")
+	return false
 
 
 func _build_ui() -> void:
