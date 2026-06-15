@@ -5,6 +5,13 @@ extends Control
 const ModalStep = preload("./modal_step.gd")
 
 
+## Initial inset applied to all four sides of the steps.
+##
+## The step anchors itself to full rect, then applies this value as left/top
+## offsets and its negative value as right/bottom offsets.
+@export var _initial_margin: float = 16.0
+
+
 var _current_step := ""
 
 
@@ -40,10 +47,10 @@ func _apply_default_layout() -> void:
 	anchor_top = 0.0
 	anchor_right = 1.0
 	anchor_bottom = 1.0
-	offset_left = 0.0
-	offset_top = 0.0
-	offset_right = 0.0
-	offset_bottom = 0.0
+	offset_left = _initial_margin
+	offset_top = _initial_margin
+	offset_right = -_initial_margin
+	offset_bottom = -_initial_margin
 
 
 func _select_initial_step() -> void:

@@ -2,12 +2,6 @@
 extends PanelContainer
 
 
-## Initial inset applied to all four sides of this step.
-##
-## The step anchors itself to full rect, then applies this value as left/top
-## offsets and its negative value as right/bottom offsets.
-@export var _initial_margin := 16.0
-
 ## Initial visibility of the top-left button.
 @export var _left_top_button_visible := true
 
@@ -163,10 +157,10 @@ func _apply_default_layout() -> void:
 	anchor_top = 0.0
 	anchor_right = 1.0
 	anchor_bottom = 1.0
-	offset_left = _initial_margin
-	offset_top = _initial_margin
-	offset_right = -_initial_margin
-	offset_bottom = -_initial_margin
+	offset_left = 0
+	offset_top = 0
+	offset_right = 0
+	offset_bottom = 0
 
 
 ## Returns the vertically scrollable content container.
