@@ -625,6 +625,22 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: GDScript performs the async RPC probe, then calls this pure
+    // state update on the main thread so no Godot object crosses threads.
+    fn set_chain_config(&mut self, rpc_url: GString, chain_id: i64) -> Dictionary {
+        let rpc_url = rpc_url.to_string();
+        if !(rpc_url.starts_with("http://") || rpc_url.starts_with("https://")) {
+            return failed("invalid_rpc_url");
+        }
+        if chain_id <= 0 {
+            return failed("invalid_chain");
+        }
+        self.rpc_url = rpc_url;
+        self.chain_id = chain_id;
+        success(self.config_json())
+    }
+
+    #[func]
     // Rationale: explicit ABI encoding lets callers construct calldata or hash
     // inputs without creating a contract instance.
     fn abi_encode(&self, args_json: GString) -> Dictionary {

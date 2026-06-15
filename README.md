@@ -258,7 +258,7 @@ client.account_destroy()
 client.account_lock()
 client.account_set_password(password)
 client.account_private_key()
-client.set_chain(rpc_url)
+await client.set_chain(rpc_url)
 ```
 
 Native wallet notes:
@@ -271,14 +271,14 @@ Native wallet notes:
 - `account_lock()` locks the wallet and clears the initialized binding state.
 - `account_set_password(password)` requires an unlocked wallet.
 - `account_private_key()` requires an unlocked wallet and returns the private key as `0x`-prefixed hex.
-- `set_chain(rpc_url)` accepts an HTTP(S) RPC URL and keeps the chain configuration in process memory.
+- `set_chain(rpc_url)` is awaitable, probes `eth_chainId`, accepts an HTTP(S) RPC URL, and keeps the chain configuration in process memory.
 
 ### Contract Helpers
 
 ```gdscript
 client.contract_create(address, abi_key)
 await client.contract_invoke(address, method, params, tx_params)
-client.contract_get_events(address, event, topics, from, to)
+await client.contract_get_events(address, event, topics, from, to)
 client.contract_get_tx_events(tx_obj, event)
 ```
 

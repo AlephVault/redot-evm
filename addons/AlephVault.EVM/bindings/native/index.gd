@@ -296,18 +296,49 @@ func account_private_key():
 func set_chain(rpc_url: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
+	if not (rpc_url.begins_with("http://") or rpc_url.begins_with("https://")):
+		return Async.failed("invalid_rpc_url")
 	var tree := Engine.get_main_loop() as SceneTree
-	if tree == null:
+	if tree == null or tree.root == null:
 		return Async.failed("incomplete_binding")
-	var thread := Thread.new()
-	var start_error := thread.start(func():
-		return _wallet.set_chain(rpc_url)
+
+	var http := HTTPRequest.new()
+	tree.root.add_child.call_deferred(http)
+	await tree.process_frame
+	var body := JSON.stringify({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "eth_chainId",
+		"params": [],
+	})
+	var request_error := http.request(
+		rpc_url,
+		PackedStringArray(["content-type: application/json"]),
+		HTTPClient.METHOD_POST,
+		body
 	)
-	if start_error != OK:
-		return Async.failed("os_error")
-	while thread.is_alive():
-		await tree.process_frame
-	var response = thread.wait_to_finish()
+	if request_error != OK:
+		http.queue_free()
+		return Async.failed("invalid_chain")
+
+	var result = await http.request_completed
+	http.queue_free()
+	if not (result is Array) or result.size() < 4:
+		return Async.failed("invalid_chain")
+	if int(result[0]) != HTTPRequest.RESULT_SUCCESS:
+		return Async.failed("invalid_chain")
+	var response_code := int(result[1])
+	if response_code < 200 or response_code >= 300:
+		return Async.failed("invalid_chain")
+	var response_body: PackedByteArray = result[3]
+	var parsed = JSON.parse_string(response_body.get_string_from_utf8())
+	if not (parsed is Dictionary) or parsed.has("error"):
+		return Async.failed("invalid_chain")
+	var chain_id = _chain_id_from_value(parsed.get("result"))
+	if chain_id <= 0:
+		return Async.failed("invalid_chain")
+
+	var response = _wallet.set_chain_config(rpc_url, chain_id)
 	if not (response is Dictionary):
 		return Async.failed("incomplete_binding")
 	if not response.get("ok", false):
@@ -444,3 +475,20 @@ func _is_tx_hash(tx_hash: String) -> bool:
 		if not _is_hex_code(tx_hash.unicode_at(i)):
 			return false
 	return true
+
+func _chain_id_from_value(value: Variant) -> int:
+	if value is int:
+		return int(value)
+	if not (value is String):
+		return 0
+	var text := String(value)
+	if text.begins_with("0x"):
+		if not _is_prefixed_hex_quantity(text):
+			return 0
+		var parsed := 0
+		for i in range(2, text.length()):
+			parsed = parsed * 16 + _hex_code_to_int(text.unicode_at(i))
+		return parsed
+	if not _is_decimal_uint(text):
+		return 0
+	return int(text)
