@@ -64,6 +64,7 @@ var _background_events_log: TextEdit
 var _debug_log: TextEdit
 var _poll_timer: Timer
 var _lock_button: Button
+var _clock_label: Label
 
 
 func _ready() -> void:
@@ -74,6 +75,22 @@ func _ready() -> void:
 		await _start_native()
 	else:
 		await _start_web()
+
+
+func _process(_delta: float) -> void:
+	if _clock_label == null:
+		return
+	var now := Time.get_datetime_dict_from_system()
+	var micros := Time.get_ticks_usec() % 1000000
+	_clock_label.text = "%04d-%02d-%02d %02d:%02d:%02d.%06d" % [
+		int(now["year"]),
+		int(now["month"]),
+		int(now["day"]),
+		int(now["hour"]),
+		int(now["minute"]),
+		int(now["second"]),
+		micros,
+	]
 
 
 func _start_web() -> void:
@@ -394,6 +411,15 @@ func _build_ui() -> void:
 	_poll_timer.wait_time = 5.0
 	_poll_timer.timeout.connect(_poll_events)
 	add_child(_poll_timer)
+
+	_clock_label = Label.new()
+	_clock_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_clock_label.offset_left = 12
+	_clock_label.offset_top = -32
+	_clock_label.offset_right = 320
+	_clock_label.offset_bottom = -8
+	_clock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_clock_label)
 
 
 func _add_balances_tab(tabs: TabContainer) -> void:
