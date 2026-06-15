@@ -9,10 +9,12 @@ The snippet loads `web3.js` and initializes:
 window.web3 = new Web3(window.ethereum);
 ```
 
-The bundled include currently pins Web3.js to `1.10.4`. The web binding helper
-code is written against the Web3 1.x API surface, including
-`web3.eth.Contract`, `web3.eth.abi`, `web3.utils.toBN`, and PromiEvent
-transaction handling.
+The bundled include currently pins Web3.js to `1.10.4` and
+`@metamask/eth-sig-util` to `8.2.0`. The web binding helper code is written
+against the Web3 1.x API surface, including `web3.eth.Contract`,
+`web3.eth.abi`, `web3.utils.toBN`, and PromiEvent transaction handling.
+MetaMask's signature utility is used as a fallback for EIP-712 typed-data
+signature recovery when Web3's optional typed-data recovery helper is absent.
 
 That gives Godot's `JavaScriptBridge` a stable browser global to call from the
 web binding. If the wallet injects `window.ethereum` after the first script pass,
@@ -37,8 +39,9 @@ boundary.
 
 The include also exposes `verifyPersonalSign` and `verifyTypedData` helpers
 used by `Web3Client.verify_personal_sign()` and
-`Web3Client.verify_eth_sign_typed_data()`. Typed-data verification depends on
-the bundled Web3 account helper `web3.eth.accounts.recoverTypedSignature`.
+`Web3Client.verify_eth_sign_typed_data()`. Typed-data verification uses
+`web3.eth.accounts.recoverTypedSignature` when available, otherwise it falls
+back to `@metamask/eth-sig-util`.
 
-For production builds, consider self-hosting the pinned `web3.min.js` asset
-instead of depending on the CDN at runtime.
+For production builds, consider self-hosting the pinned Web3 and
+`@metamask/eth-sig-util` assets instead of depending on the CDN at runtime.

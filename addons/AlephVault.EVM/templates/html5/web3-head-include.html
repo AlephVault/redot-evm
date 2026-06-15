@@ -7,6 +7,17 @@ an injected EIP-1193 provider such as MetaMask so Godot's JavaScriptBridge can
 access it as window.web3.
 -->
 <script src="https://cdn.jsdelivr.net/npm/web3@1.10.4/dist/web3.min.js"></script>
+<script type="module">
+import {
+	SignTypedDataVersion,
+	recoverTypedSignature
+} from "https://esm.sh/@metamask/eth-sig-util@8.2.0";
+
+window.alephVaultEvmEthSigUtil = {
+	SignTypedDataVersion: SignTypedDataVersion,
+	recoverTypedSignature: recoverTypedSignature
+};
+</script>
 <script>
 (function () {
 	const abiCache = {};
@@ -481,6 +492,10 @@ access it as window.web3.
 		}
 	}
 
+	function normalizeTypedData(typedData) {
+		return typeof typedData === "string" ? JSON.parse(typedData) : typedData;
+	}
+
 	function wrapSync(fn) {
 		try {
 			return jsonStringify(success(fn()));
@@ -664,12 +679,22 @@ access it as window.web3.
 				if (typeof signature !== "string") {
 					throw "invalid_signature";
 				}
-				if (typeof window.web3.eth.accounts.recoverTypedSignature !== "function") {
-					throw "incomplete_binding";
-				}
 				let recovered;
 				try {
-					recovered = window.web3.eth.accounts.recoverTypedSignature(typedData, signature);
+					if (typeof window.web3.eth.accounts.recoverTypedSignature === "function") {
+						recovered = window.web3.eth.accounts.recoverTypedSignature(typedData, signature);
+					} else if (
+						window.alephVaultEvmEthSigUtil &&
+						typeof window.alephVaultEvmEthSigUtil.recoverTypedSignature === "function"
+					) {
+						recovered = window.alephVaultEvmEthSigUtil.recoverTypedSignature({
+							data: normalizeTypedData(typedData),
+							signature: signature,
+							version: window.alephVaultEvmEthSigUtil.SignTypedDataVersion.V4
+						});
+					} else {
+						throw "incomplete_binding";
+					}
 				} catch (_error) {
 					throw "invalid_typed_data";
 				}
