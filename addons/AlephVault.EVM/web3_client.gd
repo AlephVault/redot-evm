@@ -73,9 +73,9 @@ static func _is_named_block_tag(tag: String) -> bool:
 static func _create_binding() -> Object:
 	if _binding_class == null:
 		if OS.has_feature("web"):
-			_binding_class = load("./bindings/web/index.gd")
+			_binding_class = load("res://addons/AlephVault.EVM/bindings/web/index.gd")
 		else:
-			_binding_class = load("./bindings/native/index.gd")
+			_binding_class = load("res://addons/AlephVault.EVM/bindings/native/index.gd")
 
 	return _binding_class.new()
 

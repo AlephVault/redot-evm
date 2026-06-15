@@ -121,6 +121,49 @@ else:
 
 `client.manages_wallet()` returns `true` for native bindings and `false` for web bindings.
 
+## Hardhat Sample
+
+The project main scene is:
+
+```text
+addons/AlephVault.EVM/samples/hardhat-sample.tscn
+```
+
+Its script is:
+
+```text
+addons/AlephVault.EVM/samples/hardhat_sample.gd
+```
+
+Use the values from your Hardhat project README to update these constants at the top of `hardhat_sample.gd`:
+
+```gdscript
+const HARDHAT_RPC_URL := "http://127.0.0.1:8545"
+const DEV_ACCOUNT_ADDRESS := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+const DEV_ACCOUNT_PRIVATE_KEY := "0xac0974..."
+const SMPL_CONTRACT_ADDRESS := "0x..."
+const SMPL_ABI: Array[Dictionary] = [...]
+```
+
+`SMPL_ABI` is initialized with a minimal ERC-20 style ABI for `balanceOf`, `transfer`, and `Transfer`. If your Hardhat contract exposes those same entries, only `SMPL_CONTRACT_ADDRESS` needs to change. If your contract names or event signatures differ, replace `SMPL_ABI` with the ABI from your deployment output.
+
+The sample UI includes:
+
+- ETH balance query and ETH transfer.
+- SMPL balance query and SMPL transfer through the contract helper API.
+- Per-transaction event decoding after a mined SMPL transfer.
+- A background `Transfer` event feed in a separate tab.
+- `personal_sign` creation and verification.
+- EIP-712 typed-data signature creation and verification.
+
+Runtime behavior differs by target:
+
+- Web exports call `client.initialize()` immediately and show the contract UI after the browser wallet grants account access.
+- Native exports first show `AlephVault__EVM.UI.WalletModal`. Create, restore, or unlock the native wallet there; when the wallet starts successfully, the sample hides the modal and shows the contract UI.
+- The native UI has a `Lock wallet` button. Locking hides the contract UI and reopens the wallet modal. Web deployments do not show this button because locking/unlocking is wallet-external there.
+
+For native Hardhat testing with the provided dev key, create a text file containing `DEV_ACCOUNT_PRIVATE_KEY`, choose `Restore` in the wallet modal, then unlock with password `default`. This is intended only for local Hardhat development accounts.
+
 ## Supported Web3Client Methods
 
 ### Initialization And Accounts
