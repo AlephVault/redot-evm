@@ -526,7 +526,42 @@ access it as window.web3.
 		return id;
 	};
 
+	window.alephVaultEvmProcessExpression = function (expression, callback) {
+		try {
+			return window.alephVaultEvmProcessAsync(window.eval(expression), callback);
+		} catch (error) {
+			return window.alephVaultEvmProcessAsync(reject(error), callback);
+		}
+	};
+
 	window.alephVaultEvmWeb3 = {
+		request: function (method, params) {
+			if (!window.ethereum || typeof window.ethereum.request !== "function") {
+				return reject("missing_provider");
+			}
+			return window.ethereum.request({ method: method, params: params || [] });
+		},
+
+		signTypedData: function (address, typedData) {
+			try {
+				ensureReady();
+				if (!window.ethereum || typeof window.ethereum.request !== "function") {
+					return reject("missing_provider");
+				}
+				if (!window.web3.utils.isAddress(address)) {
+					return reject("invalid_address");
+				}
+				const payload = typeof typedData === "string" ? typedData : JSON.stringify(typedData);
+				JSON.parse(payload);
+				return window.ethereum.request({
+					method: "eth_signTypedData_v4",
+					params: [window.web3.utils.toChecksumAddress(address), payload]
+				});
+			} catch (error) {
+				return reject(error);
+			}
+		},
+
 		setAbi: function (key, abi) {
 			return wrapSync(function () {
 				ensureReady();

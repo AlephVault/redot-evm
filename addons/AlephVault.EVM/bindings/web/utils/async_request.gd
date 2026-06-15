@@ -1,9 +1,9 @@
 extends RefCounted
 ## Tracks a JavaScript Promise processed by alephVaultEvmProcessAsync.
 ##
-## This is web-only glue for JavaScriptBridge. It evaluates a JavaScript
-## expression that returns a Promise, sends it to the HTML-side async processor,
-## and exposes the settled result as a standard {ok, value|error} dictionary.
+## This is web-only glue for JavaScriptBridge. It sends a JavaScript expression
+## to the HTML-side async processor and exposes the settled result as a standard
+## {ok, value|error} dictionary.
 
 const Async = preload("../../../utils/async.gd")
 
@@ -30,9 +30,8 @@ var _callback = null
 
 ## Creates and starts an AsyncRequest from a JavaScript promise expression.
 ##
-## The expression is evaluated with JavaScriptBridge.eval(..., true), so it
-## must return a JavaScript Promise or Promise-compatible value. The returned
-## AsyncRequest can be awaited with:
+## The expression is evaluated by the HTML helper, so Promise objects do not need
+## to cross the JavaScriptBridge boundary. The returned AsyncRequest can be awaited with:
 ##
 ## var response = await AsyncRequest.process(expression).wait()
 static func process(promise_expression: String):
@@ -41,10 +40,10 @@ static func process(promise_expression: String):
 
 ## Starts tracking a JavaScript promise expression.
 ##
-## On success, registers the promise in window.alephVaultEvmProcessAsync and
-## returns self immediately. On setup failure, returns self already scheduled to
-## complete with an error such as "not_web", "invalid_promise",
-## "missing_async_processor", or "invalid_request".
+## On success, registers the expression in window.alephVaultEvmProcessExpression
+## and returns self immediately. On setup failure, returns self already scheduled
+## to complete with an error such as "not_web", "missing_async_processor", or
+## "invalid_request".
 func start(promise_expression: String):
 	if not OS.has_feature("web"):
 		_complete_deferred(Async.failed("not_web"))
@@ -52,17 +51,12 @@ func start(promise_expression: String):
 
 	_callback = JavaScriptBridge.create_callback(_on_completed)
 
-	var promise = JavaScriptBridge.eval(promise_expression, true)
-	if promise == null:
-		_complete_deferred(Async.failed("invalid_promise"))
-		return self
-
-	if not JavaScriptBridge.eval("typeof window.alephVaultEvmProcessAsync === 'function'", true):
+	if not JavaScriptBridge.eval("typeof window.alephVaultEvmProcessExpression === 'function'", true):
 		_complete_deferred(Async.failed("missing_async_processor"))
 		return self
 
 	var window = JavaScriptBridge.get_interface("window")
-	id = int(window.alephVaultEvmProcessAsync(promise, _callback))
+	id = int(window.alephVaultEvmProcessExpression(promise_expression, _callback))
 	if id <= 0:
 		_complete_deferred(Async.failed("invalid_request"))
 

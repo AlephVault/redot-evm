@@ -152,6 +152,10 @@ func wait_for(tx_hash: String):
 func request(method: String, params: Array):
 	if not _ready and method != "eth_requestAccounts":
 		return Async.failed("not_ready")
+	if method == "eth_signTypedData" or method == "eth_signTypedData_v3" or method == "eth_signTypedData_v4":
+		if params.size() < 2:
+			return Async.failed("invalid_params")
+		return await _promise("window.alephVaultEvmWeb3.signTypedData(%s, %s)" % [_json(params[0]), _json(params[1])])
 	return await _request(method, params)
 
 ## Verifies a personal_sign signature against an expected address.
@@ -359,7 +363,7 @@ func contract_get_tx_events(tx_obj: Dictionary, event: Variant = null):
 	return _eval_response("window.alephVaultEvmWeb3.contractGetTxEvents(%s, %s)" % [_json(tx_obj), _json(event)])
 
 func _request(method: String, params: Array):
-	return await _promise("window.web3.provider.request({method: %s, params: %s})" % [_json(method), _json(params)])
+	return await _promise("window.alephVaultEvmWeb3.request(%s, %s)" % [_json(method), _json(params)])
 
 func _promise(expression: String):
 	return await AsyncRequest.process(expression).wait()
