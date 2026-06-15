@@ -1,5 +1,5 @@
 @tool
-extends "res://addons/AlephVault.EVM/ui/modal.gd"
+extends AlephVault__EVM.UI.Modal
 
 
 class IntroStep:
