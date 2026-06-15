@@ -305,6 +305,7 @@ func set_chain(rpc_url: String):
 	var http := HTTPRequest.new()
 	tree.root.add_child.call_deferred(http)
 	await tree.process_frame
+	await tree.process_frame
 	var body := JSON.stringify({
 		"jsonrpc": "2.0",
 		"id": 1,
