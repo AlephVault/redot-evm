@@ -103,6 +103,9 @@ func _start_native() -> void:
 
 func _on_native_wallet_started(lock: Callable) -> void:
 	_native_lock = lock
+	if _wallet_modal != null:
+		_wallet_modal.hide()
+	_status("Wallet initialized. Loading Hardhat sample...")
 	await _show_app()
 
 
@@ -122,6 +125,10 @@ func _show_app() -> void:
 	if chain_response.get("ok", false):
 		_chain_id = int(chain_response.get("value", 0))
 
+	_account_label.text = "Account: %s | Chain: %s" % [_account, str(_chain_id)]
+	_lock_button.visible = _client.manages_wallet()
+	_app_root.visible = true
+
 	var abi_response = _client.set_abi(SMPL_ABI_KEY, SMPL_ABI)
 	if not abi_response.get("ok", false):
 		_status("ABI setup failed: %s" % str(abi_response.get("error", "unknown_error")))
@@ -132,11 +139,6 @@ func _show_app() -> void:
 		_log("Set SMPL_CONTRACT_ADDRESS to your deployed contract address.")
 		return
 
-	_account_label.text = "Account: %s | Chain: %s" % [_account, str(_chain_id)]
-	_lock_button.visible = _client.manages_wallet()
-	_app_root.visible = true
-	if _wallet_modal != null:
-		_wallet_modal.hide()
 	_status("Ready.")
 	await _refresh_balances()
 	_start_event_polling()
