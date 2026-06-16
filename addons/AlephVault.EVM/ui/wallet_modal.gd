@@ -1,5 +1,4 @@
-@tool
-extends "res://addons/AlephVault.EVM/ui/modal.gd"
+extends AlephVault__EVM.UI.Modal
 
 
 ## Emitted after the native wallet has been unlocked and initialized.
