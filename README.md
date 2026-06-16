@@ -196,7 +196,9 @@ await client.request(method, params)
 ```gdscript
 await client.personal_sign(message, address)
 await client.eth_sign_typed_data(typed_data, address)
+client.recover_personal_sign(message, signature)
 client.verify_personal_sign(address, message, signature)
+client.recover_eth_sign_typed_data(typed_data, signature)
 client.verify_eth_sign_typed_data(address, typed_data, signature)
 ```
 
@@ -207,7 +209,9 @@ client.verify_eth_sign_typed_data(address, typed_data, signature)
 
 If `address` is empty, the helper uses the first account returned by `get_accounts()`. `message` can be a `String` or `PackedByteArray`; byte arrays are encoded as `0x`-prefixed hex strings before signing or verification.
 
-Verification helpers are binding-backed and return `{"ok": true, "value": bool}`. `verify_personal_sign()` recovers the signer using the EIP-191/personal-sign message hash. `verify_eth_sign_typed_data()` recovers the signer using the EIP-712 typed-data hash. Web typed-data verification requires the included Web3 build to expose `web3.eth.accounts.recoverTypedSignature`; otherwise it returns `incomplete_binding`.
+Recovery and verification helpers are binding-backed. `recover_personal_sign()` and `recover_eth_sign_typed_data()` return `{"ok": true, "value": address}` with the recovered signer address. `verify_personal_sign()` and `verify_eth_sign_typed_data()` return `{"ok": true, "value": bool}` after comparing the recovered signer against the expected address.
+
+`recover_personal_sign()` and `verify_personal_sign()` use the EIP-191/personal-sign message hash. `recover_eth_sign_typed_data()` and `verify_eth_sign_typed_data()` use the EIP-712 typed-data hash. Web typed-data recovery uses `web3.eth.accounts.recoverTypedSignature` when available, otherwise it falls back to the included `@metamask/eth-sig-util` helper. If neither helper is available, typed-data recovery and verification return `incomplete_binding`.
 
 ### ABI Utilities
 

@@ -176,7 +176,15 @@ func _init():
 #       Where error is a valid JSON-compatible value. The syntax and
 #       semantics is defined by the underlying RPC execution.
 #
-# 11. verify_personal_sign(address: String, message: String | PackedByteArray, signature: String) returning:
+# 11. recover_personal_sign(message: String | PackedByteArray, signature: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is the recovered signer address for the
+#       personal_sign/EIP-191 message hash.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_message", "invalid_signature", or
+#       "incomplete_binding".
+#
+# 12. verify_personal_sign(address: String, message: String | PackedByteArray, signature: String) returning:
 #     - {"ok": true, "value": bool}
 #       Where value is true when signature recovers to address using the
 #       personal_sign/EIP-191 message hash.
@@ -184,7 +192,15 @@ func _init():
 #       Where error can be "invalid_address", "invalid_message",
 #       "invalid_signature", or "incomplete_binding".
 #
-# 12. verify_eth_sign_typed_data(address: String, typed_data: Dictionary | String, signature: String) returning:
+# 13. recover_eth_sign_typed_data(typed_data: Dictionary | String, signature: String) returning:
+#     - {"ok": true, "value": String}
+#       Where value is the recovered signer address for the EIP-712 typed-data
+#       hash.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_typed_data", "invalid_signature", or
+#       "incomplete_binding".
+#
+# 14. verify_eth_sign_typed_data(address: String, typed_data: Dictionary | String, signature: String) returning:
 #     - {"ok": true, "value": bool}
 #       Where value is true when signature recovers to address using the
 #       EIP-712 typed-data hash.
@@ -194,7 +210,7 @@ func _init():
 #
 # --------- ABI-related methods ---------
 #
-# 13. set_abi(key: String, abi: Array[Dictionary]) returning:
+# 15. set_abi(key: String, abi: Array[Dictionary]) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "incomplete_binding" if, somehow, the binding
@@ -203,7 +219,7 @@ func _init():
 #       appropriate format or is an empty array, or "invalid_key" if
 #       the key is not a [a-zA-Z0-9_]+ identifier.
 #
-# 14. get_abi(key: String) returning:
+# 16. get_abi(key: String) returning:
 #     - {"ok": true, "value": Array[Dictionary]}
 #       Where value is the ABI that was set in a previous set_abi call.
 #     - {"ok": false, "error": String}
@@ -211,7 +227,7 @@ func _init():
 #       could not be created (e.g. the native implementation is somehow
 #       not available). Also "not_found" if no ABI exists at given key.
 #
-# 15. abi_encode(args: Array) returning:
+# 17. abi_encode(args: Array) returning:
 #     - {"ok": true, "value": PackedByteArray}
 #       Where value is the standard ABI encoding of the provided
 #       arguments.
@@ -222,7 +238,7 @@ func _init():
 #       is not a valid EVM type, or "invalid_value" if a value cannot
 #       be encoded for its resolved type.
 #
-# 16. abi_encode_packed(args: Array) returning:
+# 18. abi_encode_packed(args: Array) returning:
 #     - {"ok": true, "value": PackedByteArray}
 #       Where value is the packed ABI encoding of the provided
 #       arguments.
@@ -231,7 +247,7 @@ func _init():
 #       "invalid_type", or "invalid_value". They're the same ones that
 #       were described for `abi_encode`.
 #
-# 17. abi_decode(args: PackedByteArray, spec: Array) returning:
+# 19. abi_decode(args: PackedByteArray, spec: Array) returning:
 #     - {"ok": true, "value": Array}
 #       Where value contains the decoded values as non-dictionary
 #       elements.
@@ -257,14 +273,14 @@ func _init():
 #
 # --------- Data-related methods ---------
 #
-# 18. keccak256(b: PackedByteArray) returning:
+# 20. keccak256(b: PackedByteArray) returning:
 #     - {"ok": true, "value": PackedByteArray}
 #       Where value is exactly 32 bytes.
 #     - {"ok": false, "error": String}
 #       Where error can be "incomplete_binding" if the binding is not
 #       complete enough to compute Keccak-256.
 #
-# 19. from_wei(amount: String, unit: String) returning:
+# 21. from_wei(amount: String, unit: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is the amount converted from wei into unit.
 #     - {"ok": false, "error": String}
@@ -273,7 +289,7 @@ func _init():
 #       "incomplete_binding" if the binding is not complete enough to
 #       perform bigint unit conversions.
 #
-# 20. to_wei(amount: String, unit: String) returning:
+# 22. to_wei(amount: String, unit: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is the amount converted from unit into wei.
 #     - {"ok": false, "error": String}
@@ -282,7 +298,7 @@ func _init():
 #       "incomplete_binding" if the binding is not complete enough to
 #       perform bigint unit conversions.
 #
-# 21. from_hex(hex: String) returning:
+# 23. from_hex(hex: String) returning:
 #     - {"ok": true, "value": PackedByteArray}
 #       Where value is the decoded byte array. "" and "0x" decode
 #       successfully into an empty PackedByteArray.
@@ -291,7 +307,7 @@ func _init():
 #       characters, a misplaced 0x prefix, an odd number of hex digits,
 #       or another invalid hex representation.
 #
-# 22. to_checksum_address(address: String) returning:
+# 24. to_checksum_address(address: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is the EIP-55 checksummed address.
 #     - {"ok": false, "error": String}
@@ -299,25 +315,25 @@ func _init():
 #       0x-prefixed 40-hex-digit address format, or "incomplete_binding"
 #       if the binding is not complete enough to compute the checksum.
 #
-# 23. to_hex(value: PackedByteArray) returning:
+# 25. to_hex(value: PackedByteArray) returning:
 #     - {"ok": true, "value": String}
 #       Where value is a 0x-prefixed hex string.
 #
-# 24. decimal_to_hex(decimal: String) returning:
+# 26. decimal_to_hex(decimal: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is a 0x-prefixed hex string.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" or "incomplete_binding" if the
 #       binding is not complete enough to perform bigint conversions.
 #
-# 25. hex_to_decimal(hex: String) returning:
+# 27. hex_to_decimal(hex: String) returning:
 #     - {"ok": true, "value": String}
 #       Where value is a decimal numeric string.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" or "incomplete_binding" if the
 #       binding is not complete enough to perform bigint conversions.
 #
-# 26. validate_block_tag(tag: String) returning:
+# 28. validate_block_tag(tag: String) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value". Valid block tags are
@@ -325,7 +341,7 @@ func _init():
 #       canonical 0x-prefixed hex quantity without leading zeroes
 #       except for "0x0".
 #
-# 27. validate_uint(value: String, size: int) returning:
+# 29. validate_uint(value: String, size: int) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" if value is not a valid uint
@@ -333,7 +349,7 @@ func _init():
 #       8, 16, ..., 256, or "incomplete_binding" if the binding is not
 #       complete enough to validate bigint ranges.
 #
-# 28. validate_int(value: String, size: int) returning:
+# 30. validate_int(value: String, size: int) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" if value is not a valid int
@@ -341,7 +357,7 @@ func _init():
 #       8, 16, ..., 256, or "incomplete_binding" if the binding is not
 #       complete enough to validate bigint ranges.
 #
-# 29. validate_bytes(value: String | PackedByteArray, size: int = 0) returning:
+# 31. validate_bytes(value: String | PackedByteArray, size: int = 0) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value" if value is not valid for
@@ -350,7 +366,7 @@ func _init():
 #       When size is 0, the hex digit count must be even. When size is
 #       1..32, the hex digit count must be exactly size * 2.
 #
-# 30. validate_address(value: String, checksum: bool = false) returning:
+# 32. validate_address(value: String, checksum: bool = false) returning:
 #     - {"ok": true, "value": null}
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_value". A valid address is a string
@@ -359,10 +375,10 @@ func _init():
 #       returned if checksum validation is requested but the binding is
 #       not complete enough to compute/verify the checksum.
 #
-# 31. manages_wallet() returning bool:
+# 33. manages_wallet() returning bool:
 #     Returns true when the binding manages local wallet/account material.
 #
-# 32. Native wallet lifecycle methods:
+# 34. Native wallet lifecycle methods:
 #     account_exists(), await account_create(password), account_destroy(),
 #     await account_backup(target_path), await account_restore(source_path),
 #     await account_unlock(password), account_lock(),
@@ -375,7 +391,7 @@ func _init():
 #
 # --------- Contract-related methods ---------
 #
-# 33. contract_create(address: String, abi_key: String) returning:
+# 35. contract_create(address: String, abi_key: String) returning:
 #     - {"ok": true, "value": null}
 #       Where the binding creates and stores a contract reference for the
 #       address and ABI, such as window.web3.Contract(...) in web builds.
@@ -385,7 +401,7 @@ func _init():
 #       address, or "not_found" if abi_key does not match a registered ABI.
 #     This method is synchronous and only performs setup.
 #
-# 34. (asynchronous) contract_invoke(
+# 36. (asynchronous) contract_invoke(
 #       address: String, method: String | Dictionary, params: Array,
 #       tx_params: Dictionary
 #     ) returning:
@@ -402,7 +418,7 @@ func _init():
 #     configuration dictionary syntax as transfer()'s tx_config. Contract
 #     view/pure calls may also pass "block" or "blockTag".
 #
-# 35. (asynchronous) contract_get_events(
+# 37. (asynchronous) contract_get_events(
 #       address: String, event: String | Dictionary, topics: Array | Dictionary,
 #       from: String = "0x0", to: String = "latest"
 #     ) returning:
@@ -417,7 +433,7 @@ func _init():
 #     binding resolves overloads. Topics can be an array of up to three
 #     topic values, or a dictionary keyed by valid indexed field names.
 #
-# 36. contract_get_tx_events(
+# 38. contract_get_tx_events(
 #       tx_obj: Dictionary, event: String | Dictionary | null = null
 #     ) returning:
 #     - {"ok": true, "value": Array}
@@ -572,9 +588,20 @@ func verify_personal_sign(address: String, message: Variant, signature: String):
 		return _failed("invalid_message")
 	return _binding.verify_personal_sign(address, encoded, signature)
 
+## Recovers the signer address from a personal_sign signature.
+func recover_personal_sign(message: Variant, signature: String):
+	var encoded = _signature_message_value(message)
+	if encoded == null:
+		return _failed("invalid_message")
+	return _binding.recover_personal_sign(encoded, signature)
+
 ## Verifies an EIP-712 typed-data signature against an expected address.
 func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String):
 	return _binding.verify_eth_sign_typed_data(address, typed_data, signature)
+
+## Recovers the signer address from an EIP-712 typed-data signature.
+func recover_eth_sign_typed_data(typed_data: Variant, signature: String):
+	return _binding.recover_eth_sign_typed_data(typed_data, signature)
 
 # --------- ABI-related methods ---------
 # These methods are not necessarily standard methods, but the underlying

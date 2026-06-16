@@ -233,6 +233,22 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
+    // Rationale: exposing recovery directly lets callers compare, display, or
+    // store the signer address without inventing a dummy expected address.
+    fn recover_personal_sign(&self, message: GString, signature: GString) -> Dictionary {
+        let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
+            return failed("invalid_message");
+        };
+        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
+            return failed("invalid_signature");
+        };
+        match signature.recover_address_from_msg(&bytes) {
+            Ok(recovered) => success(json!(format_address(recovered))),
+            Err(_) => failed("invalid_signature"),
+        }
+    }
+
+    #[func]
     // Rationale: EIP-712 verification uses the same typed-data hash that the
     // native signer uses for eth_signTypedData variants.
     fn verify_eth_sign_typed_data(
@@ -269,6 +285,40 @@ impl AlephVaultEvmNativeWallet {
             Ok(recovered) => success(json!(
                 hex::encode(recovered.as_slice()).eq_ignore_ascii_case(&expected)
             )),
+            Err(_) => failed("invalid_signature"),
+        }
+    }
+
+    #[func]
+    // Rationale: SIWE-like login must distinguish a malformed signature from
+    // a valid signature made by a different address.
+    fn recover_eth_sign_typed_data(
+        &self,
+        typed_data_json: GString,
+        signature: GString,
+    ) -> Dictionary {
+        let Ok(typed_value) = serde_json::from_str::<Value>(&typed_data_json.to_string()) else {
+            return failed("invalid_typed_data");
+        };
+        let typed_value = if typed_value.is_string() {
+            match serde_json::from_str::<Value>(typed_value.as_str().unwrap()) {
+                Ok(value) => value,
+                Err(_) => return failed("invalid_typed_data"),
+            }
+        } else {
+            typed_value
+        };
+        let Ok(typed_data) = serde_json::from_value::<TypedData>(typed_value) else {
+            return failed("invalid_typed_data");
+        };
+        let Ok(hash) = typed_data.eip712_signing_hash() else {
+            return failed("invalid_typed_data");
+        };
+        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
+            return failed("invalid_signature");
+        };
+        match signature.recover_address_from_prehash(&hash) {
+            Ok(recovered) => success(json!(format_address(recovered))),
             Err(_) => failed("invalid_signature"),
         }
     }
