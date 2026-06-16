@@ -158,25 +158,25 @@ func request(method: String, params: Array):
 		return await _promise("window.alephVaultEvmWeb3.signTypedData(%s, %s)" % [_json(params[0]), _json(params[1])])
 	return await _request(method, params)
 
-## Verifies a personal_sign signature against an expected address.
-func verify_personal_sign(address: String, message: Variant, signature: String):
-	if not (message is String):
-		return Async.failed("invalid_message")
-	return _eval_response("window.alephVaultEvmWeb3.verifyPersonalSign(%s, %s, %s)" % [_json(address), _json(message), _json(signature)])
-
 ## Recovers the signer address from a personal_sign signature.
 func recover_personal_sign(message: Variant, signature: String):
 	if not (message is String):
 		return Async.failed("invalid_message")
 	return _eval_response("window.alephVaultEvmWeb3.recoverPersonalSign(%s, %s)" % [_json(message), _json(signature)])
 
-## Verifies an EIP-712 typed-data signature against an expected address.
-func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String):
-	return _eval_response("window.alephVaultEvmWeb3.verifyTypedData(%s, %s, %s)" % [_json(address), _json(typed_data), _json(signature)])
+## Recovers the signer address from an eth_sign signature.
+func recover_eth_sign(message: Variant, signature: String):
+	if not (message is String):
+		return Async.failed("invalid_message")
+	return _eval_response("window.alephVaultEvmWeb3.recoverEthSign(%s, %s)" % [_json(message), _json(signature)])
 
 ## Returns the address that signed this EIP-712 typed-data.
 func recover_eth_sign_typed_data(typed_data: Variant, signature: String):
 	return _eval_response("window.alephVaultEvmWeb3.recoverTypedData(%s, %s)" % [_json(typed_data), _json(signature)])
+
+## Returns the sender address for a submitted transaction hash.
+func recover_eth_send_transaction(tx_hash: String):
+	return await _promise("window.alephVaultEvmWeb3.recoverSentTransaction(%s)" % _json(tx_hash))
 
 ## Stores an ABI in the JavaScript-side ABI cache.
 ##

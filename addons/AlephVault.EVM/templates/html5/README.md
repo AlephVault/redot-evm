@@ -37,15 +37,15 @@ reuse, method resolution, event decoding, and event filtering are handled in the
 JavaScript side so cached Web3 objects never need to cross the JavaScriptBridge
 boundary.
 
-The include also exposes `recoverPersonalSign`, `verifyPersonalSign`,
-`recoverTypedData`, and `verifyTypedData` helpers used by
-`Web3Client.recover_personal_sign()`, `Web3Client.verify_personal_sign()`,
-`Web3Client.recover_eth_sign_typed_data()`, and
-`Web3Client.verify_eth_sign_typed_data()`. The recover helpers return the
-recovered signer address; the verify helpers compare that address with the
-expected address and return a boolean. Typed-data recovery uses
+The include also exposes `recoverPersonalSign`, `recoverEthSign`,
+`recoverTypedData`, and `recoverSentTransaction` helpers used by the
+`Web3Client` recovery methods. The recover helpers return the recovered signer
+or sender address; `Web3Client` implements verification as a thin address
+comparison over those recovery methods. Typed-data recovery uses
 `web3.eth.accounts.recoverTypedSignature` when available, otherwise it falls
-back to `@metamask/eth-sig-util`.
+back to `@metamask/eth-sig-util`. `recoverSentTransaction` is asynchronous and
+uses `web3.eth.getTransaction(txHash)` to return the submitted transaction's
+`from` address.
 
 For production builds, consider self-hosting the pinned Web3 and
 `@metamask/eth-sig-util` assets instead of depending on the CDN at runtime.

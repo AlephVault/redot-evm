@@ -671,12 +671,9 @@ window.alephVaultEvmEthSigUtil = {
 			});
 		},
 
-		verifyPersonalSign: function (address, message, signature) {
+		recoverEthSign: function (message, signature) {
 			return wrapSync(function () {
 				ensureReady();
-				if (!window.web3.utils.isAddress(address)) {
-					throw "invalid_address";
-				}
 				if (typeof message !== "string") {
 					throw "invalid_message";
 				}
@@ -685,11 +682,12 @@ window.alephVaultEvmEthSigUtil = {
 				}
 				let recovered;
 				try {
-					recovered = window.web3.eth.accounts.recover(message, signature);
+					const hash = window.web3.utils.keccak256(message);
+					recovered = window.web3.eth.accounts.recover(hash, signature, true);
 				} catch (_error) {
 					throw "invalid_signature";
 				}
-				return normalizeAddress(recovered) === normalizeAddress(address);
+				return window.web3.utils.toChecksumAddress(recovered);
 			});
 		},
 
@@ -725,39 +723,19 @@ window.alephVaultEvmEthSigUtil = {
 			});
 		},
 
-		verifyTypedData: function (address, typedData, signature) {
-			return wrapSync(function () {
-				ensureReady();
-				if (!window.web3.utils.isAddress(address)) {
-					throw "invalid_address";
-				}
-				if (!isRecoverableSignature(signature)) {
-					throw "invalid_signature";
-				}
-				let recovered;
-				try {
-					if (typeof window.web3.eth.accounts.recoverTypedSignature === "function") {
-						recovered = window.web3.eth.accounts.recoverTypedSignature(typedData, signature);
-					} else if (
-						window.alephVaultEvmEthSigUtil &&
-						typeof window.alephVaultEvmEthSigUtil.recoverTypedSignature === "function"
-					) {
-						recovered = window.alephVaultEvmEthSigUtil.recoverTypedSignature({
-							data: normalizeTypedData(typedData),
-							signature: signature,
-							version: window.alephVaultEvmEthSigUtil.SignTypedDataVersion.V4
-						});
-					} else {
-						throw "incomplete_binding";
-					}
-				} catch (error) {
-					if (error === "incomplete_binding") {
-						throw error;
-					}
-					throw "invalid_typed_data";
-				}
-				return normalizeAddress(recovered) === normalizeAddress(address);
-			});
+		recoverSentTransaction: async function (txHash) {
+			ensureReady();
+			if (!/^0x[0-9a-fA-F]{64}$/.test(String(txHash))) {
+				throw "invalid_tx_hash";
+			}
+			const tx = await window.web3.eth.getTransaction(txHash);
+			if (!tx) {
+				throw "not_found";
+			}
+			if (!tx.from || !window.web3.utils.isAddress(tx.from)) {
+				throw "invalid_transaction";
+			}
+			return window.web3.utils.toChecksumAddress(tx.from);
 		},
 
 		contractCreate: function (address, abiKey) {

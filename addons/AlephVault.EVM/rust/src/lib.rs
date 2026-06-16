@@ -206,33 +206,6 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
-    // Rationale: verification is pure address recovery, so it should be
-    // available without exposing private keys or requiring an RPC call.
-    fn verify_personal_sign(
-        &self,
-        address: GString,
-        message: GString,
-        signature: GString,
-    ) -> Dictionary {
-        let address = address.to_string();
-        let Some(expected) = normalize_address(&address) else {
-            return failed("invalid_address");
-        };
-        let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
-            return failed("invalid_message");
-        };
-        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
-            return failed("invalid_signature");
-        };
-        match signature.recover_address_from_msg(&bytes) {
-            Ok(recovered) => success(json!(
-                hex::encode(recovered.as_slice()).eq_ignore_ascii_case(&expected)
-            )),
-            Err(_) => failed("invalid_signature"),
-        }
-    }
-
-    #[func]
     // Rationale: exposing recovery directly lets callers compare, display, or
     // store the signer address without inventing a dummy expected address.
     fn recover_personal_sign(&self, message: GString, signature: GString) -> Dictionary {
@@ -249,42 +222,18 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
-    // Rationale: EIP-712 verification uses the same typed-data hash that the
-    // native signer uses for eth_signTypedData variants.
-    fn verify_eth_sign_typed_data(
-        &self,
-        address: GString,
-        typed_data_json: GString,
-        signature: GString,
-    ) -> Dictionary {
-        let address = address.to_string();
-        let Some(expected) = normalize_address(&address) else {
-            return failed("invalid_address");
+    // Rationale: eth_sign signs the Keccak digest of the raw message bytes, so
+    // recovery must use the same prehash instead of the EIP-191 message path.
+    fn recover_eth_sign(&self, message: GString, signature: GString) -> Dictionary {
+        let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
+            return failed("invalid_message");
         };
-        let Ok(typed_value) = serde_json::from_str::<Value>(&typed_data_json.to_string()) else {
-            return failed("invalid_typed_data");
-        };
-        let typed_value = if typed_value.is_string() {
-            match serde_json::from_str::<Value>(typed_value.as_str().unwrap()) {
-                Ok(value) => value,
-                Err(_) => return failed("invalid_typed_data"),
-            }
-        } else {
-            typed_value
-        };
-        let Ok(typed_data) = serde_json::from_value::<TypedData>(typed_value) else {
-            return failed("invalid_typed_data");
-        };
-        let Ok(hash) = typed_data.eip712_signing_hash() else {
-            return failed("invalid_typed_data");
-        };
+        let hash = B256::from(keccak_bytes(&bytes));
         let Ok(signature) = Signature::from_str(&signature.to_string()) else {
             return failed("invalid_signature");
         };
         match signature.recover_address_from_prehash(&hash) {
-            Ok(recovered) => success(json!(
-                hex::encode(recovered.as_slice()).eq_ignore_ascii_case(&expected)
-            )),
+            Ok(recovered) => success(json!(format_address(recovered))),
             Err(_) => failed("invalid_signature"),
         }
     }
@@ -320,6 +269,32 @@ impl AlephVaultEvmNativeWallet {
         match signature.recover_address_from_prehash(&hash) {
             Ok(recovered) => success(json!(format_address(recovered))),
             Err(_) => failed("invalid_signature"),
+        }
+    }
+
+    #[func]
+    // Rationale: eth_sendTransaction returns a hash, not a signature. Recovering
+    // its signer means asking the connected node for the submitted transaction.
+    fn recover_eth_send_transaction(&self, tx_hash: GString) -> Dictionary {
+        let hash = tx_hash.to_string();
+        let Some(bytes) = decode_hex_bytes(&hash) else {
+            return failed("invalid_tx_hash");
+        };
+        if bytes.len() != 32 {
+            return failed("invalid_tx_hash");
+        }
+        match rpc_request(&self.rpc_url, "eth_getTransactionByHash", json!([hash])) {
+            Ok(Value::Null) => failed("not_found"),
+            Ok(tx) => {
+                let Some(from) = tx.get("from").and_then(Value::as_str) else {
+                    return failed("invalid_transaction");
+                };
+                let Some(address) = parse_address(from) else {
+                    return failed("invalid_transaction");
+                };
+                success(json!(format_address(address)))
+            }
+            Err(error) => error_response(error),
         }
     }
 

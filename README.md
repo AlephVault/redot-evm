@@ -153,8 +153,8 @@ The sample UI includes:
 - SMPL balance query and SMPL transfer through the contract helper API.
 - Per-transaction event decoding after a mined SMPL transfer.
 - A background `Transfer` event feed in a separate tab.
-- `personal_sign` creation and verification.
-- EIP-712 typed-data signature creation and verification.
+- `personal_sign` and EIP-712 typed-data signature creation and verification.
+- Recovery-backed signature/sender verification helpers.
 
 Runtime behavior differs by target:
 
@@ -195,23 +195,33 @@ await client.request(method, params)
 
 ```gdscript
 await client.personal_sign(message, address)
+await client.eth_sign(message, address)
 await client.eth_sign_typed_data(typed_data, address)
+await client.eth_send_transaction(tx_config)
 client.recover_personal_sign(message, signature)
 client.verify_personal_sign(address, message, signature)
+client.recover_eth_sign(message, signature)
+client.verify_eth_sign(address, message, signature)
 client.recover_eth_sign_typed_data(typed_data, signature)
 client.verify_eth_sign_typed_data(address, typed_data, signature)
+await client.recover_eth_send_transaction(tx_hash)
+await client.verify_eth_send_transaction(address, tx_hash)
 ```
 
-`personal_sign()` and `eth_sign_typed_data()` are top-level helpers over `request()`. They do not add new binding methods for signing:
+The signing and transaction helpers are thin `Web3Client` wrappers over `request()`:
 
 - `personal_sign(message, address = "")` calls `personal_sign` with `[message, address]`.
+- `eth_sign(message, address = "")` calls `eth_sign` with `[address, message]`.
 - `eth_sign_typed_data(typed_data, address = "")` calls `eth_signTypedData` with `[address, typed_data]`.
+- `eth_send_transaction(tx_config)` calls `eth_sendTransaction` with `[tx_config]`.
 
 If `address` is empty, the helper uses the first account returned by `get_accounts()`. `message` can be a `String` or `PackedByteArray`; byte arrays are encoded as `0x`-prefixed hex strings before signing or verification.
 
-Recovery and verification helpers are binding-backed. `recover_personal_sign()` and `recover_eth_sign_typed_data()` return `{"ok": true, "value": address}` with the recovered signer address. `verify_personal_sign()` and `verify_eth_sign_typed_data()` return `{"ok": true, "value": bool}` after comparing the recovered signer against the expected address.
+Recovery helpers are binding-backed. `recover_personal_sign()`, `recover_eth_sign()`, and `recover_eth_sign_typed_data()` return `{"ok": true, "value": address}` with the recovered signer address. `recover_eth_send_transaction()` returns the sender address reported by `eth_getTransactionByHash` for a submitted transaction hash.
 
-`recover_personal_sign()` and `verify_personal_sign()` use the EIP-191/personal-sign message hash. `recover_eth_sign_typed_data()` and `verify_eth_sign_typed_data()` use the EIP-712 typed-data hash. Web typed-data recovery uses `web3.eth.accounts.recoverTypedSignature` when available, otherwise it falls back to the included `@metamask/eth-sig-util` helper. If neither helper is available, typed-data recovery and verification return `incomplete_binding`.
+Verification helpers exist only in `Web3Client`; bindings expose recovery only. `verify_personal_sign()`, `verify_eth_sign()`, `verify_eth_sign_typed_data()`, and `verify_eth_send_transaction()` compare the recovered address with the expected address and return `{"ok": true, "value": bool}`.
+
+`recover_personal_sign()` and `verify_personal_sign()` use the EIP-191/personal-sign message hash. `recover_eth_sign()` and `verify_eth_sign()` use the raw `eth_sign` Keccak message hash. `recover_eth_sign_typed_data()` and `verify_eth_sign_typed_data()` use the EIP-712 typed-data hash. Web typed-data recovery uses `web3.eth.accounts.recoverTypedSignature` when available, otherwise it falls back to the included `@metamask/eth-sig-util` helper. If neither helper is available, typed-data recovery and verification return `incomplete_binding`.
 
 ### ABI Utilities
 
