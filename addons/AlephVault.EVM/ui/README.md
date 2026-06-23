@@ -338,6 +338,91 @@ If the native wallet must be initialized against a specific RPC endpoint, assign
 wallet_modal.chain_rpc_url = "http://127.0.0.1:8545"
 ```
 
+All visible WalletModal copy is routed through `text_overrides`. Override only
+the keys you need; missing keys keep the built-in English defaults. The selected
+text is also passed through Godot's `tr()`, so values can be source strings in a
+project translation catalog:
+
+```gdscript
+wallet_modal.text_overrides = {
+	"button.unlock": "Desbloquear",
+	"placeholder.master_password": "Contrasena maestra",
+	"status.unlock_failed": "No se pudo desbloquear: %s",
+}
+```
+
+The complete available text settings, and default values, are:
+
+```json
+{
+	"button.back": "Back",
+	"button.backup": "Backup",
+	"button.change_password": "Change password",
+	"button.confirm_deletion": "Confirm deletion",
+	"button.create": "Create",
+	"button.delete": "Delete",
+	"button.lock": "Lock",
+	"button.private_key": "Private key",
+	"button.restore": "Restore",
+	"button.reveal": "Reveal",
+	"button.start": "Start",
+	"button.unlock": "Unlock",
+	"placeholder.confirm_new_password": "Confirm new password",
+	"placeholder.confirmation_code": "Confirmation code",
+	"placeholder.confirm_master_password": "Confirm master password",
+	"placeholder.master_password": "Master password",
+	"placeholder.new_master_password": "New master password",
+	"placeholder.new_password": "New password",
+	"placeholder.private_key_hidden": "Private key hidden",
+	"text.account_creation_failed": "Account creation failed.",
+	"text.changing_password_intro": "Choose a new master password for the unlocked wallet. After changing it, the wallet will be locked and you will return to Welcome so you can unlock again.",
+	"text.changing_password_warning": "The old password cannot be used anymore. Previous backups still require the password that was active when each backup was created. Do not lose the new password; note it before submitting.",
+	"text.create_or_restore": "No native wallet account exists. Create a new account with a master password, or restore an encrypted account backup.",
+	"text.delete_confirmation_code": "To confirm deletion, type this 8-digit code exactly:",
+	"text.delete_warning": "This will permanently delete the encrypted native wallet account from local storage. This action cannot be undone unless you have a valid backup.",
+	"text.existing_wallet": "A native wallet account exists. Enter the master password to unlock it and continue. You can also create a backup of the encrypted account before unlocking.",
+	"text.native_unavailable": "This wallet dialog is intended for native builds. HTML5 builds use the browser wallet directly.",
+	"text.plain_imports": "Plain unencrypted imports are also accepted as a text file containing 0x..., or JSON containing private_key/privateKey. These imports create the encrypted wallet with password \"default\".",
+	"text.private_key_warning": "Reveal the private key only when you need to migrate this account to another wallet. Anyone with this value can control the account.",
+	"text.unlocked_account_address": "Unlocked account address:",
+	"status.account_created": "Account created. Unlock it to continue.",
+	"status.account_deleted": "Account deleted.",
+	"status.account_restored": "Account restored or imported. Unlock it to continue.",
+	"status.account_unlocked": "Account unlocked.",
+	"status.backup_created": "Backup created.",
+	"status.backup_destination": "Choose a backup destination.",
+	"status.backup_failed": "Backup failed: %s",
+	"status.chain_setup_failed": "Chain setup failed: %s",
+	"status.change_password_failed": "Password change failed: %s",
+	"status.change_password_prompt": "Enter a new password.",
+	"status.changing_password": "Changing password...",
+	"status.confirm_delete_prompt": "Type the confirmation code before deleting.",
+	"status.create_password_prompt": "Enter a password for the new account.",
+	"status.creating_account": "Creating account...",
+	"status.creating_backup": "Creating backup...",
+	"status.creation_failed": "Creation failed: %s",
+	"status.deleting_account": "Deleting account...",
+	"status.deletion_failed": "Deletion failed: %s",
+	"status.import_invalid_private_key": "Import failed: invalid private key.",
+	"status.initialization_failed": "Initialization failed: %s",
+	"status.initializing_wallet": "Initializing wallet...",
+	"status.inspect_failed": "Could not inspect wallet state: %s",
+	"status.native_unavailable": "Native wallet management is not available in this environment.",
+	"status.password_changed": "Password changed. Unlock with the new password.",
+	"status.password_confirmation_mismatch": "Password confirmation does not match.",
+	"status.private_key_hidden": "Private key hidden.",
+	"status.private_key_retrieval_failed": "Private key retrieval failed: %s",
+	"status.private_key_retrieved": "Private key revealed.",
+	"status.restore_failed": "Restore failed: %s",
+	"status.restore_source": "Choose a backup file to restore.",
+	"status.restoring_account": "Restoring account...",
+	"status.retrieving_private_key": "Retrieving private key...",
+	"status.unlock_failed": "Unlock failed: %s",
+	"status.unlocking_account": "Unlocking account...",
+	"status.wallet_initialized": "Wallet initialized."
+}
+```
+
 When the user unlocks and starts the wallet successfully, the modal emits:
 
 ```gdscript
