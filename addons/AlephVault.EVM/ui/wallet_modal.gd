@@ -61,6 +61,8 @@ class WelcomeStep:
 			return
 
 		if bool(exists_response.get("value", false)):
+			if await modal._redirect_to_main_if_unlocked():
+				return
 			_show_existing_wallet()
 		else:
 			_show_missing_wallet()
@@ -94,9 +96,13 @@ class WelcomeStep:
 	func _buttonc1_pressed():
 		var modal = get_parent()
 		if _password_edit != null:
+			if await modal._redirect_to_main_if_unlocked():
+				return
 			status = "Unlocking account..."
 			var response = await modal.client.account_unlock(_password_edit.text)
 			if not response.get("ok", false):
+				if str(response.get("error", "")) == "invalid_state" and await modal._redirect_to_main_if_unlocked():
+					return
 				status = "Unlock failed: %s" % str(response.get("error", "unknown_error"))
 				return
 			modal._address = str(response.get("value", ""))
@@ -521,6 +527,30 @@ func _get_current_address() -> String:
 		if not accounts.is_empty():
 			_address = str(accounts[0])
 	return _address
+
+
+func _redirect_to_main_if_unlocked() -> bool:
+	var address := await _get_unlocked_wallet_address()
+	if address.is_empty():
+		return false
+	_address = address
+	current_step = "Main"
+	return true
+
+
+func _get_unlocked_wallet_address() -> String:
+	if not _has_native_wallet():
+		return ""
+
+	var response = await client.request("eth_accounts", [])
+	if not response.get("ok", false):
+		return ""
+
+	var accounts = response.get("value", [])
+	if not (accounts is Array) or accounts.is_empty():
+		return ""
+
+	return str(accounts[0])
 
 
 func _ensure_dialogs() -> void:
