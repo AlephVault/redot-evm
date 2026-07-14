@@ -42,10 +42,23 @@ func _init():
 	window.__alephVaultEvmChainChanged = _chain_changed_callback
 
 ## Requests account access from the EIP-1193 provider and marks the binding ready.
+## If the HTML helper is configured with a read-only RPC fallback, marks the
+## binding ready with no accounts and no signing or transaction capability.
 ##
 ## Returns {"ok": true, "value": null} on success, or a standard failure
 ## dictionary. Accounts are cached internally and exposed through get_accounts().
 func initialize():
+	_ensure_web3_initialized()
+	if _is_read_only():
+		_ready = true
+		_accounts = []
+		var read_only_chain_response = await get_chain_id()
+		if not read_only_chain_response.get("ok", false):
+			_ready = false
+			_chain_id = 0
+			return read_only_chain_response
+		return Async.success(null)
+
 	var response = await _request("eth_requestAccounts", [])
 	if not response.get("ok", false):
 		var error = response.get("error")
@@ -78,9 +91,10 @@ func get_chain_id():
 	_chain_id = _hex_quantity_to_int(String(response.get("value", "0x0")))
 	return Async.success(_chain_id)
 
-## Returns true because browser wallets can be asked to switch chains.
+## Returns true when the web binding is backed by a browser wallet that can be
+## asked to switch chains. Read-only RPC fallback providers cannot switch.
 func can_set_chain_id() -> bool:
-	return true
+	return not _is_read_only()
 
 ## Requests a wallet chain switch to chain_id.
 ##
@@ -89,6 +103,8 @@ func can_set_chain_id() -> bool:
 func set_chain_id(chain_id: int):
 	if not _ready:
 		return Async.failed("not_ready")
+	if _is_read_only():
+		return Async.failed("read_only")
 	if chain_id <= 0:
 		return Async.failed("invalid_chain")
 
@@ -105,6 +121,9 @@ func set_chain_id(chain_id: int):
 func get_accounts():
 	if not _ready:
 		return Async.failed("not_ready")
+	if _is_read_only():
+		_accounts = []
+		return Async.success(_accounts)
 
 	var response = await _request("eth_accounts", [])
 	if not response.get("ok", false):
@@ -290,6 +309,10 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return false
 
+## Returns true when the web binding is using the read-only RPC fallback.
+func is_read_only() -> bool:
+	return _is_read_only()
+
 func account_exists():
 	return Async.failed("not_supported")
 
@@ -319,6 +342,20 @@ func account_private_key():
 
 func set_chain(_rpc_url: String):
 	return Async.failed("not_supported")
+
+## Sets the read-only fallback RPC URL used when no browser wallet is injected.
+##
+## Call before initialize(). If a wallet is present, the HTML helper still
+## prefers the wallet provider.
+func set_read_only_rpc_url(rpc_url: String):
+	if _ready:
+		return Async.failed("already_initialized")
+	if not (rpc_url.begins_with("http://") or rpc_url.begins_with("https://")):
+		return Async.failed("invalid_rpc_url")
+	var response = _eval_response("window.alephVaultEvmWeb3.setReadOnlyRpcUrl(%s)" % _json(rpc_url))
+	if response.get("ok", false):
+		_ensure_web3_initialized()
+	return response
 
 ## Encodes bytes as a 0x-prefixed lowercase hex string.
 func to_hex(value: PackedByteArray):
@@ -374,6 +411,26 @@ func contract_get_tx_events(tx_obj: Dictionary, event: Variant = null):
 
 func _request(method: String, params: Array):
 	return await _promise("window.alephVaultEvmWeb3.request(%s, %s)" % [_json(method), _json(params)])
+
+func _ensure_web3_initialized():
+	JavaScriptBridge.eval("""
+		(function () {
+			if (typeof window.alephVaultEvmInitWeb3 === 'function') {
+				window.alephVaultEvmInitWeb3();
+			}
+		}());
+	""", true)
+
+func _is_read_only() -> bool:
+	return bool(JavaScriptBridge.eval("""
+		(function () {
+			return !!(
+				window.alephVaultEvmWeb3 &&
+				typeof window.alephVaultEvmWeb3.isReadOnly === 'function' &&
+				window.alephVaultEvmWeb3.isReadOnly()
+			);
+		}());
+	""", true))
 
 func _promise(expression: String):
 	return await AsyncRequest.process(expression).wait()

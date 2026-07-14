@@ -428,14 +428,19 @@ func _init():
 # 40. manages_wallet() returning bool:
 #     Returns true when the binding manages local wallet/account material.
 #
-# 41. Native wallet lifecycle methods:
+# 41. is_read_only() returning bool:
+#     Returns true when this binding is currently read-only.
+#
+# 42. Native wallet lifecycle methods:
 #     account_exists(), await account_create(password), account_destroy(),
 #     await account_backup(target_path), await account_restore(source_path),
 #     await account_unlock(password), account_lock(),
 #     await account_set_password(password), account_private_key(), and
 #     await set_chain(rpc_url).
 #     Web bindings return {"ok": false, "error": "not_supported"} for all of
-#     these methods. Native bindings support a single encrypted account whose
+#     these methods. Web bindings also support set_read_only_rpc_url(rpc_url)
+#     before initialize() to configure the browser read-only fallback.
+#     Native bindings support a single encrypted account whose
 #     private key only crosses into GDScript when account_private_key() is
 #     explicitly called while unlocked.
 #
@@ -515,7 +520,10 @@ func _init():
 ##
 ## - Web bindings will do it directly against the EIP-1193 wallet.
 ##   When the wallet is ready (the web3 instance), then this call
-##   will resolve successfully with {"ok": true, "value": null}.
+##   will resolve successfully with {"ok": true, "value": null}. Web exports
+##   configured with a read-only RPC fallback can also initialize without a
+##   wallet; get_accounts() will return an empty array and signing or
+##   transaction methods will fail with "read_only".
 ## - Native bindings require the Rust wallet to be unlocked and to have one
 ##   account plus a configured chain. Success still resolves as
 ##   {"ok": true, "value": null}; use get_accounts() and get_chain_id() for
@@ -859,6 +867,11 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return _binding.manages_wallet()
 
+## Returns whether this binding is currently read-only. Web bindings return true
+## when using the read-only RPC fallback; native bindings return false.
+func is_read_only() -> bool:
+	return _binding.is_read_only()
+
 ## Returns whether the native wallet keystore exists. Web bindings return
 ## {"ok": false, "error": "not_supported"}.
 func account_exists():
@@ -910,6 +923,11 @@ func account_private_key():
 ## not_supported.
 func set_chain(rpc_url: String):
 	return await _binding.set_chain(rpc_url)
+
+## Sets the web read-only fallback HTTP RPC URL to use when no browser wallet is
+## injected. Call before initialize(). Native bindings return not_supported.
+func set_read_only_rpc_url(rpc_url: String):
+	return _binding.set_read_only_rpc_url(rpc_url)
 
 # --------- Contract-related methods ---------
 

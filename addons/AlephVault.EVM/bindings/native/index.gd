@@ -254,6 +254,9 @@ func validate_address(value: String, checksum: bool = false):
 func manages_wallet() -> bool:
 	return true
 
+func is_read_only() -> bool:
+	return false
+
 func account_exists():
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
@@ -362,6 +365,9 @@ func set_chain(rpc_url: String):
 		_chain_id = int(_config.get("chain_id", 0))
 		_accounts = _config.get("accounts", _accounts)
 	return response
+
+func set_read_only_rpc_url(_rpc_url: String):
+	return Async.failed("not_supported")
 
 func to_hex(value: PackedByteArray):
 	var hex := "0x"

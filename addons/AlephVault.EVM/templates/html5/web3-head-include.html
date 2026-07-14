@@ -4,7 +4,10 @@ AlephVault.EVM HTML5 head include.
 Use this in the Web export preset's "Head Include" field, or copy it into a
 custom HTML shell before the Godot engine starts. It creates window.web3 from
 an injected EIP-1193 provider such as MetaMask so Godot's JavaScriptBridge can
-access it as window.web3.
+access it as window.web3. If no wallet is injected, set
+window.alephVaultEvmReadOnlyRpcUrl before this include or call
+Web3Client.set_read_only_rpc_url() before initialize() to initialize a
+read-only HTTP RPC provider.
 -->
 <script src="https://cdn.jsdelivr.net/npm/web3@1.10.4/dist/web3.min.js"></script>
 <script type="module">
@@ -24,6 +27,11 @@ window.alephVaultEvmEthSigUtil = {
 	const contractCache = {};
 	let nextAsyncId = 1;
 	const pendingAsync = {};
+	let readOnlyProvider = false;
+
+	if (typeof window.alephVaultEvmReadOnlyRpcUrl === "undefined") {
+		window.alephVaultEvmReadOnlyRpcUrl = "";
+	}
 
 	function success(value) {
 		return { ok: true, value: value };
@@ -38,16 +46,38 @@ window.alephVaultEvmEthSigUtil = {
 	}
 
 	function hasWeb3() {
-		return !!(window.Web3 && window.ethereum && window.web3);
+		return !!(window.Web3 && window.web3);
+	}
+
+	function readOnlyRpcUrl() {
+		return String(window.alephVaultEvmReadOnlyRpcUrl || "").trim();
+	}
+
+	function setReadOnlyRpcUrl(rpcUrl) {
+		window.alephVaultEvmReadOnlyRpcUrl = String(rpcUrl || "").trim();
+		return initAlephVaultWeb3();
 	}
 
 	function initAlephVaultWeb3() {
-		if (!window.Web3 || !window.ethereum) {
+		if (!window.Web3) {
 			return false;
 		}
 
-		window.web3 = new Web3(window.ethereum);
-		window.web3.provider = window.ethereum;
+		if (window.ethereum) {
+			window.web3 = new Web3(window.ethereum);
+			window.web3.provider = window.ethereum;
+			readOnlyProvider = false;
+			return true;
+		}
+
+		const rpcUrl = readOnlyRpcUrl();
+		if (!rpcUrl) {
+			return false;
+		}
+
+		window.web3 = new Web3(new Web3.providers.HttpProvider(rpcUrl));
+		window.web3.provider = window.web3.currentProvider;
+		readOnlyProvider = true;
 		return true;
 	}
 
@@ -514,6 +544,60 @@ window.alephVaultEvmEthSigUtil = {
 		}
 	}
 
+	function isReadOnlyRequest(method) {
+		const name = String(method || "");
+		return !(
+			name === "eth_sendTransaction" ||
+			name === "eth_sendRawTransaction" ||
+			name === "eth_sign" ||
+			name === "eth_signTransaction" ||
+			name === "eth_signTypedData" ||
+			name === "eth_signTypedData_v3" ||
+			name === "eth_signTypedData_v4" ||
+			name === "personal_sign" ||
+			name.indexOf("wallet_") === 0
+		);
+	}
+
+	function readOnlyRpcRequest(method, params) {
+		if (!isReadOnlyRequest(method)) {
+			return reject("read_only");
+		}
+		return new Promise(function (resolve, rejectPromise) {
+			const provider = window.web3 && (window.web3.currentProvider || window.web3.provider);
+			if (!provider) {
+				rejectPromise("missing_provider");
+				return;
+			}
+			const payload = {
+				jsonrpc: "2.0",
+				id: Date.now(),
+				method: method,
+				params: params || []
+			};
+			const callback = function (error, response) {
+				if (error) {
+					rejectPromise(error);
+					return;
+				}
+				if (response && response.error) {
+					rejectPromise(response.error);
+					return;
+				}
+				resolve(response ? response.result : null);
+			};
+			if (typeof provider.request === "function") {
+				provider.request({ method: method, params: params || [] }).then(resolve).catch(rejectPromise);
+			} else if (typeof provider.send === "function") {
+				provider.send(payload, callback);
+			} else if (typeof provider.sendAsync === "function") {
+				provider.sendAsync(payload, callback);
+			} else {
+				rejectPromise("missing_provider");
+			}
+		});
+	}
+
 	window.alephVaultEvmProcessAsync = function (promise, callback) {
 		const id = nextAsyncId++;
 		pendingAsync[id] = true;
@@ -554,7 +638,22 @@ window.alephVaultEvmEthSigUtil = {
 	};
 
 	window.alephVaultEvmWeb3 = {
+		isReadOnly: function () {
+			return readOnlyProvider;
+		},
+
+		setReadOnlyRpcUrl: function (rpcUrl) {
+			return wrapSync(function () {
+				setReadOnlyRpcUrl(rpcUrl);
+				return null;
+			});
+		},
+
 		request: function (method, params) {
+			ensureReady();
+			if (readOnlyProvider) {
+				return readOnlyRpcRequest(method, params);
+			}
 			if (!window.ethereum || typeof window.ethereum.request !== "function") {
 				return reject("missing_provider");
 			}
@@ -564,6 +663,9 @@ window.alephVaultEvmEthSigUtil = {
 		signTypedData: function (address, typedData) {
 			try {
 				ensureReady();
+				if (readOnlyProvider) {
+					return reject("read_only");
+				}
 				if (!window.ethereum || typeof window.ethereum.request !== "function") {
 					return reject("missing_provider");
 				}
@@ -620,6 +722,9 @@ window.alephVaultEvmEthSigUtil = {
 		transfer: function (address, amount, txConfig) {
 			try {
 				ensureReady();
+				if (readOnlyProvider) {
+					return reject("read_only");
+				}
 				if (!isNonZeroAddress(address)) {
 					return reject("invalid_address");
 				}
@@ -773,6 +878,9 @@ window.alephVaultEvmEthSigUtil = {
 					});
 				}
 
+				if (readOnlyProvider) {
+					return reject("read_only");
+				}
 				return sendAndResolveHash(runner.method.send(normalizeTxConfig(txParams)));
 			} catch (error) {
 				return reject(error);
@@ -987,6 +1095,7 @@ window.alephVaultEvmEthSigUtil = {
 	window.alephVaultEvmAbiCache = abiCache;
 	window.alephVaultEvmContractCache = contractCache;
 	window.alephVaultEvmInitWeb3 = initAlephVaultWeb3;
+	window.alephVaultEvmSetReadOnlyRpcUrl = setReadOnlyRpcUrl;
 
 	if (!initAlephVaultWeb3()) {
 		window.addEventListener("ethereum#initialized", initAlephVaultWeb3, { once: true });
