@@ -326,7 +326,7 @@ add_child(wallet_modal)
 wallet_modal.show_from_scratch()
 ```
 
-By default it creates its own `AlephVault__EVM.Web3Client`. You can assign an existing client before `_ready()` if your application owns the client instance:
+By default, it creates its own `AlephVault__EVM.Web3Client`. You can assign an existing client before `_ready()` if your application owns the client instance:
 
 ```gdscript
 wallet_modal.client = my_web3_client
