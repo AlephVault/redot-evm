@@ -194,9 +194,13 @@ await client.request(method, params)
 ### Signing And Verification
 
 ```gdscript
+client.confirm_modal = tx_confirm_modal
 await client.personal_sign(message, address)
 await client.eth_sign(message, address)
 await client.eth_sign_typed_data(typed_data, address)
+await client.request("eth_signTypedData_v3", [address, typed_data])
+await client.request("eth_signTypedData_v4", [address, typed_data])
+await client.request("eth_signTransaction", [tx_config])
 await client.eth_send_transaction(tx_config)
 client.recover_personal_sign(message, signature)
 client.verify_personal_sign(address, message, signature)
@@ -214,6 +218,19 @@ The signing and transaction helpers are thin `Web3Client` wrappers over `request
 - `eth_sign(message, address = "")` calls `eth_sign` with `[address, message]`.
 - `eth_sign_typed_data(typed_data, address = "")` calls `eth_signTypedData` with `[address, typed_data]`.
 - `eth_send_transaction(tx_config)` calls `eth_sendTransaction` with `[tx_config]`.
+
+Native wallets can use `AlephVault__EVM.UI.TXConfirmModal` to ask the user before local signing or transaction submission:
+
+```gdscript
+var tx_confirm_modal := AlephVault__EVM.UI.TXConfirmModal.new()
+add_child(tx_confirm_modal)
+
+client.confirm_modal = tx_confirm_modal
+```
+
+`confirm_modal` is intended only for native wallets. Assigning it on web pushes a `not_supported` error and leaves the property unchanged because browser wallets provide their own approval dialogs.
+
+When configured, native confirmation is requested for `personal_sign`, `eth_sign`, `eth_signTypedData`, `eth_signTypedData_v3`, `eth_signTypedData_v4`, `eth_signTransaction`, `eth_sendTransaction`, `transfer()`, and native contract transactions through `contract_invoke()`. For `contract_invoke()`, ABI method dictionaries marked `view` or `pure` skip confirmation; string method names are confirmed conservatively because the facade cannot know their mutability before the binding resolves the ABI. The dialog is shown after the incoming request is validated and normalized. Rejection returns `{"ok": false, "error": "user_rejected"}`. Native confirmation currently accepts legacy and EIP-1559 (`0x2`) transaction shapes; access-list/EIP-2930 transactions return `unsupported_transaction_type`.
 
 If `address` is empty, the helper uses the first account returned by `get_accounts()`. `message` can be a `String` or `PackedByteArray`; byte arrays are encoded as `0x`-prefixed hex strings before signing or verification.
 
@@ -306,6 +323,7 @@ The UI namespace exposes:
 AlephVault__EVM.UI.Modal
 AlephVault__EVM.UI.ModalStep
 AlephVault__EVM.UI.WalletModal
+AlephVault__EVM.UI.TXConfirmModal
 ```
 
 See [ui/README.md](ui/README.md) for modal step layout, theming, and `WalletModal` setup.

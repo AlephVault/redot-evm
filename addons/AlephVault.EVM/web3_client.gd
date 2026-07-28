@@ -81,6 +81,20 @@ static func _create_binding() -> Object:
 
 # The binding for this facade in particular.
 var _binding = null
+var _tx_confirm_modal = null
+
+## Native-only transaction/signature confirmation modal.
+##
+## Assign an AlephVault__EVM.UI.TXConfirmModal in native builds. Web wallets
+## provide their own approval UI, so assignment fails with a push_error() and
+## leaves the property unchanged.
+var confirm_modal:
+	get:
+		return _tx_confirm_modal
+	set(value):
+		var response = _set_confirm_modal(value)
+		if not response.get("ok", false):
+			push_error(str(response.get("error", "invalid_modal")))
 
 func _init():
 	_binding = _create_binding()
@@ -591,6 +605,25 @@ func get_balance(address: String):
 ## from address and amount, so callers should not rely on conflicting
 ## tx_config values for those keys.
 func transfer(address: String, amount: String, tx_config: Dictionary):
+	if _uses_native_confirmations():
+		if not _is_non_zero_address_value(address):
+			return _failed("invalid_address")
+		if not _is_decimal_uint_value(amount):
+			return _failed("invalid_amount")
+		var tx := tx_config.duplicate(true)
+		tx["to"] = address
+		var hex_amount = await decimal_to_hex(amount)
+		if not hex_amount.get("ok", false):
+			return hex_amount
+		tx["value"] = hex_amount.get("value", "0x0")
+		var normalized_response = await _normalize_transaction_for_confirmation(tx)
+		if not normalized_response.get("ok", false):
+			return normalized_response
+		var normalized_tx = normalized_response.get("value", {})
+		var confirmation = await _confirm_wallet_request("eth_sendTransaction", {"kind": "transaction", "transaction": normalized_tx})
+		if not confirmation.get("ok", false):
+			return confirmation
+		return await _binding.request("eth_sendTransaction", [normalized_tx])
 	return await _binding.transfer(address, amount, tx_config)
 
 ## Waits for a transaction. Returns either the transaction's
@@ -603,6 +636,18 @@ func wait_for(tx_hash: String):
 ## the binding, while the huge majority are forwarded to the node
 ## the binding is connected to.
 func request(method: String, params: Array):
+	if _uses_native_confirmations():
+		var confirmation_payload = await _confirmation_payload_for_request(method, params)
+		if not confirmation_payload.get("ok", false):
+			return confirmation_payload
+		var payload_value = confirmation_payload.get("value", null)
+		if payload_value is Dictionary:
+			var payload = payload_value
+			var confirmation = await _confirm_wallet_request(method, payload)
+			if not confirmation.get("ok", false):
+				return confirmation
+			if payload.has("params"):
+				params = payload.get("params", params)
 	return await _binding.request(method, params)
 
 ## Requests a personal_sign signature from the selected wallet/provider.
@@ -946,6 +991,23 @@ func contract_create(address: String, abi_key: String):
 ## as transfer()'s tx_config. Contract view/pure calls may also pass "block"
 ## or "blockTag".
 func contract_invoke(address: String, method: Variant, params: Array, tx_params: Dictionary):
+	if _uses_native_confirmations() and _contract_invoke_requires_confirmation(method):
+		if not _is_non_zero_address_value(address):
+			return _failed("invalid_address")
+		var normalized_tx_params_response = await _normalize_tx_params_for_confirmation(tx_params)
+		if not normalized_tx_params_response.get("ok", false):
+			return normalized_tx_params_response
+		var normalized_tx_params = normalized_tx_params_response.get("value", {})
+		var confirmation = await _confirm_wallet_request("contract_invoke", {
+			"kind": "contract",
+			"contract": address,
+			"method": method,
+			"params": params,
+			"tx_params": normalized_tx_params,
+		})
+		if not confirmation.get("ok", false):
+			return confirmation
+		tx_params = normalized_tx_params
 	return await _binding.contract_invoke(address, method, params, tx_params)
 
 ## Gets ABI-decoded events for a registered contract.
@@ -980,3 +1042,255 @@ func _signature_message_value(message: Variant) -> Variant:
 	if message is String:
 		return message
 	return null
+
+func _uses_native_confirmations() -> bool:
+	return _tx_confirm_modal != null and manages_wallet()
+
+func _set_confirm_modal(modal: Object) -> Dictionary:
+	if modal == null:
+		_tx_confirm_modal = null
+		return _success(null)
+	if not manages_wallet():
+		return _failed("not_supported")
+	if not modal.has_method("confirm_request"):
+		return _failed("invalid_modal")
+	_tx_confirm_modal = modal
+	return _success(null)
+
+func _confirm_wallet_request(method: String, payload: Dictionary) -> Dictionary:
+	if _tx_confirm_modal == null or not _tx_confirm_modal.has_method("confirm_request"):
+		return _failed("invalid_modal")
+	var approved = await _tx_confirm_modal.confirm_request(method, payload)
+	if not bool(approved):
+		return _failed("user_rejected")
+	return _success(null)
+
+func _confirmation_payload_for_request(method: String, params: Array) -> Dictionary:
+	if method == "eth_sign":
+		if params.size() < 2:
+			return _failed("invalid_params")
+		var eth_sign_account := str(params[0])
+		if not (await _is_known_account_value(eth_sign_account)):
+			return _failed("unknown_account")
+		var eth_sign_message = _signature_message_value(params[1])
+		if eth_sign_message == null:
+			return _failed("invalid_message")
+		return _success({
+			"kind": "sign",
+			"account": eth_sign_account,
+			"message": eth_sign_message,
+			"params": [eth_sign_account, eth_sign_message],
+		})
+
+	if method == "personal_sign":
+		if params.size() < 2:
+			return _failed("invalid_params")
+		var account_index := 1
+		var message_index := 0
+		if (await _is_known_account_value(params[0])):
+			account_index = 0
+			message_index = 1
+		var personal_account := str(params[account_index])
+		if not (await _is_known_account_value(personal_account)):
+			return _failed("unknown_account")
+		var personal_message = _signature_message_value(params[message_index])
+		if personal_message == null:
+			return _failed("invalid_message")
+		return _success({
+			"kind": "sign",
+			"account": personal_account,
+			"message": personal_message,
+			"params": [personal_message, personal_account],
+		})
+
+	if _is_typed_data_method(method):
+		if params.size() < 2:
+			return _failed("invalid_params")
+		var typed_data = params[1]
+		if typed_data is String:
+			var parsed = JSON.parse_string(typed_data)
+			if parsed == null:
+				return _failed("invalid_typed_data")
+			typed_data = parsed
+		if not (typed_data is Dictionary):
+			return _failed("invalid_typed_data")
+		var typed_account := str(params[0])
+		if not (await _is_known_account_value(typed_account)):
+			return _failed("unknown_account")
+		return _success({
+			"kind": "typed",
+			"account": typed_account,
+			"typed_data": typed_data,
+			"params": [typed_account, typed_data],
+		})
+
+	if method == "eth_signTransaction" or method == "eth_sendTransaction":
+		if params.size() < 1 or not (params[0] is Dictionary):
+			return _failed("invalid_params")
+		var request_tx = params[0]
+		var normalized_tx_response = await _normalize_transaction_for_confirmation(request_tx)
+		if not normalized_tx_response.get("ok", false):
+			return normalized_tx_response
+		var tx = normalized_tx_response.get("value", {})
+		return _success({
+			"kind": "transaction",
+			"transaction": tx,
+			"params": [tx],
+		})
+
+	return _success(null)
+
+func _is_typed_data_method(method: String) -> bool:
+	return method == "eth_signTypedData" or method == "eth_signTypedData_v3" or method == "eth_signTypedData_v4"
+
+func _contract_invoke_requires_confirmation(method: Variant) -> bool:
+	if method is Dictionary:
+		var state := str(method.get("stateMutability", "")).to_lower()
+		return state != "view" and state != "pure"
+	return true
+
+func _first_account() -> Dictionary:
+	var accounts = await get_accounts()
+	if not accounts.get("ok", false):
+		return accounts
+	var values = accounts.get("value", [])
+	if not (values is Array) or values.is_empty():
+		return _failed("no_valid_accounts")
+	return _success(str(values[0]))
+
+func _normalize_transaction_for_confirmation(tx_config: Dictionary) -> Dictionary:
+	var tx := tx_config.duplicate(true)
+	if not tx.has("from"):
+		var account_response = await _first_account()
+		if not account_response.get("ok", false):
+			return account_response
+		tx["from"] = account_response.get("value", "")
+	if not _is_non_zero_address_value(str(tx.get("from", ""))):
+		return _failed("invalid_from")
+	if not (await _is_known_account_value(tx.get("from", ""))):
+		return _failed("unknown_account")
+	if not tx.has("to") or not _is_non_zero_address_value(str(tx.get("to", ""))):
+		return _failed("invalid_to")
+	var tx_type_response = _transaction_type_code(tx)
+	if not tx_type_response.get("ok", false):
+		return tx_type_response
+	var tx_type := int(tx_type_response.get("value", 0))
+	if tx_type == 1 or tx.has("accessList"):
+		return _failed("unsupported_transaction_type")
+	if tx_type == 2 and not tx.has("maxFeePerGas"):
+		return _failed("missing_maxFeePerGas")
+
+	for key in ["value", "gas", "gasLimit", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "chainId", "chain_id"]:
+		if tx.has(key):
+			var normalized = await _normalize_uint_quantity(tx[key])
+			if not normalized.get("ok", false):
+				return _failed("invalid_%s" % key)
+			tx[key] = normalized.get("value", "0x0")
+
+	if tx.has("data") and not _is_even_hex(str(tx["data"])):
+		return _failed("invalid_data")
+	if tx.has("accessList") and not (tx["accessList"] is Array):
+		return _failed("invalid_access_list")
+
+	return _success(tx)
+
+func _normalize_tx_params_for_confirmation(tx_params: Dictionary) -> Dictionary:
+	var normalized_tx_params := tx_params.duplicate(true)
+	var tx_type_response = _transaction_type_code(normalized_tx_params)
+	if not tx_type_response.get("ok", false):
+		return tx_type_response
+	var tx_type := int(tx_type_response.get("value", 0))
+	if tx_type == 1 or normalized_tx_params.has("accessList"):
+		return _failed("unsupported_transaction_type")
+	if tx_type == 2 and not normalized_tx_params.has("maxFeePerGas"):
+		return _failed("missing_maxFeePerGas")
+	for key in ["value", "gas", "gasLimit", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "chainId", "chain_id"]:
+		if normalized_tx_params.has(key):
+			var normalized = await _normalize_uint_quantity(normalized_tx_params[key])
+			if not normalized.get("ok", false):
+				return _failed("invalid_%s" % key)
+			normalized_tx_params[key] = normalized.get("value", "0x0")
+	if normalized_tx_params.has("from") and not _is_non_zero_address_value(str(normalized_tx_params["from"])):
+		return _failed("invalid_from")
+	if normalized_tx_params.has("from") and not (await _is_known_account_value(normalized_tx_params["from"])):
+		return _failed("unknown_account")
+	return _success(normalized_tx_params)
+
+func _transaction_type_code(tx: Dictionary) -> Dictionary:
+	if tx.has("type"):
+		var raw_type = tx["type"]
+		if raw_type is int:
+			if int(raw_type) < 0 or int(raw_type) > 2:
+				return _failed("invalid_transaction_type")
+			return _success(int(raw_type))
+		if raw_type is String:
+			var type_text := str(raw_type).to_lower()
+			if type_text == "legacy":
+				return _success(0)
+			if type_text == "0" or type_text == "0x0":
+				return _success(0)
+			if type_text == "1" or type_text == "0x1":
+				return _success(1)
+			if type_text == "2" or type_text == "0x2":
+				return _success(2)
+		return _failed("invalid_transaction_type")
+	if tx.has("maxFeePerGas") or tx.has("maxPriorityFeePerGas"):
+		return _success(2)
+	if tx.has("accessList"):
+		return _success(1)
+	return _success(0)
+
+func _normalize_uint_quantity(value: Variant) -> Dictionary:
+	if value is int:
+		if int(value) < 0:
+			return _failed("invalid_value")
+		return await decimal_to_hex(str(value))
+	if value is float:
+		if float(value) < 0.0 or float(value) != floor(float(value)):
+			return _failed("invalid_value")
+		return await decimal_to_hex(str(int(value)))
+	if not (value is String):
+		return _failed("invalid_value")
+	var text := String(value)
+	if text.begins_with("0x"):
+		if not _is_prefixed_hex_quantity(text):
+			return _failed("invalid_value")
+		return _success(text)
+	if not _is_decimal_uint_value(text):
+		return _failed("invalid_value")
+	return await decimal_to_hex(text)
+
+func _is_known_account_value(value: Variant) -> bool:
+	var account := str(value).to_lower()
+	var accounts = await get_accounts()
+	if not accounts.get("ok", false):
+		return false
+	var values = accounts.get("value", [])
+	if not (values is Array):
+		return false
+	for candidate in values:
+		if str(candidate).to_lower() == account:
+			return true
+	return false
+
+func _is_decimal_uint_value(value: String) -> bool:
+	if value.is_empty():
+		return false
+	for i in range(value.length()):
+		var code = value.unicode_at(i)
+		if code < 48 or code > 57:
+			return false
+	return true
+
+func _is_non_zero_address_value(address: String) -> bool:
+	var stripped = _strip_optional_0x(address)
+	if stripped.length() != 40:
+		return false
+	var non_zero := false
+	for i in range(stripped.length()):
+		var code = stripped.unicode_at(i)
+		if not _is_hex_code(code):
+			return false
+		if code != 48:
+			non_zero = true
+	return non_zero

@@ -1,10 +1,11 @@
 # AlephVault EVM UI Modals
 
-This directory provides two modal building blocks:
+This directory provides modal building blocks and native-wallet modal flows:
 
 - `modal.gd`: a wizard-style container that shows one modal step at a time.
 - `modal_step.gd`: a single responsive step with top buttons, scrollable content, status text, and bottom buttons.
 - `wallet_modal.gd`: a native-wallet account management modal built on top of `modal.gd` and `modal_step.gd`.
+- `tx_confirm_modal.gd`: a native-wallet signing and transaction approval modal.
 
 The namespace entry point is:
 
@@ -12,6 +13,7 @@ The namespace entry point is:
 const Modal = AlephVault__EVM.UI.Modal
 const ModalStep = AlephVault__EVM.UI.ModalStep
 const WalletModal = AlephVault__EVM.UI.WalletModal
+const TXConfirmModal = AlephVault__EVM.UI.TXConfirmModal
 ```
 
 ## Creating A Modal
@@ -80,6 +82,32 @@ modal.current_step = "Connect"
 ```
 
 `current_step` is exported, so it can also be configured in the inspector. If it is empty or does not match a valid step name, the modal selects the first child that inherits from `ModalStep`.
+
+## TXConfirmModal
+
+`TXConfirmModal` is intended for native wallets only. Browser wallets already show their own approval UI.
+
+```gdscript
+var client := AlephVault__EVM.Web3Client.new()
+var tx_confirm_modal := AlephVault__EVM.UI.TXConfirmModal.new()
+add_child(tx_confirm_modal)
+
+client.confirm_modal = tx_confirm_modal
+```
+
+`client.confirm_modal = tx_confirm_modal` is intended for native bindings. Web bindings push `not_supported` and leave the property unchanged. When configured, the modal is shown for native `personal_sign`, `eth_sign`, `eth_signTypedData`, `eth_signTypedData_v3`, `eth_signTypedData_v4`, `eth_signTransaction`, `eth_sendTransaction`, `transfer()`, and `contract_invoke()` calls that are not explicitly known to be `view` or `pure`.
+
+The transaction review adapts to legacy and EIP-1559 (`0x2`) gas fields. Access-list/EIP-2930 transactions are rejected before the dialog because the native signer does not currently preserve access lists.
+
+Customize text the same way as `WalletModal`, by assigning `text_overrides`. Values are passed through `tr()` so they can use Godot translations:
+
+```gdscript
+tx_confirm_modal.text_overrides = {
+	"button.approve": "Approve",
+	"button.reject": "Reject",
+	"title.eth_sendTransaction": "Send transaction",
+}
+```
 
 ## ModalStep Layout
 
@@ -158,6 +186,8 @@ The modal step internals use `theme_type_variation` names so a single theme can 
 | `ModalSecondaryButton` | Secondary bottom button |
 
 If a variation does not define an item, Godot falls back to the base type. For example, `ModalPrimaryButton` falls back to `Button`.
+
+`TXConfirmModal` also uses `TXConfirmTitle` for its request title label, `TXConfirmField` for field groups, `TXConfirmFieldLabel` for field labels, and `TXConfirmFieldValue` for read-only field text boxes.
 
 ### Margins And Spacing
 
