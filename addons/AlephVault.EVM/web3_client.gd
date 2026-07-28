@@ -1058,8 +1058,11 @@ func _set_confirm_modal(modal: Object) -> Dictionary:
 	return _success(null)
 
 func _confirm_wallet_request(method: String, payload: Dictionary) -> Dictionary:
-	if _tx_confirm_modal == null or not _tx_confirm_modal.has_method("confirm_request"):
+	if _tx_confirm_modal != null and not _tx_confirm_modal.has_method("confirm_request"):
 		return _failed("invalid_modal")
+	if _tx_confirm_modal == null:
+		push_warning("It is recommended to use a TXConfirmModal instance to confirm user transactions!")
+		return _success(null)
 	var approved = await _tx_confirm_modal.confirm_request(method, payload)
 	if not bool(approved):
 		return _failed("user_rejected")
