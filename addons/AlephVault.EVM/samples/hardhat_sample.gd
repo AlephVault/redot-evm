@@ -1,6 +1,7 @@
 extends Control
 
 const WalletModal = AlephVault__EVM.UI.WalletModal
+const TXConfirmModal = AlephVault__EVM.UI.TXConfirmModal
 const Web3Client = AlephVault__EVM.Web3Client
 
 # Replace these with the values from your Hardhat deployment README.
@@ -38,6 +39,7 @@ const SMPL_ABI: Array[Dictionary] = [
 
 var _client := Web3Client.new()
 var _wallet_modal = null
+var _tx_confirm_modal = null
 var _native_lock: Callable
 var _account := ""
 var _chain_id := 0
@@ -115,9 +117,29 @@ func _start_native() -> void:
 	_wallet_modal.chain_rpc_url = HARDHAT_RPC_URL
 	_wallet_modal.started.connect(_on_native_wallet_started)
 	add_child(_wallet_modal)
+
+	_tx_confirm_modal = TXConfirmModal.new()
+	_tx_confirm_modal.visible = false
+	_apply_solid_tx_confirm_theme(_tx_confirm_modal)
+	add_child(_tx_confirm_modal)
+	_client.confirm_modal = _tx_confirm_modal
+
 	_status("Unlock or import the native wallet.")
 	_log("For the Hardhat dev account, restore a text file containing this private key: %s" % DEV_ACCOUNT_PRIVATE_KEY)
+	_log("Native signing and transaction requests will ask for confirmation.")
 	_wallet_modal.show_from_scratch()
+
+
+func _apply_solid_tx_confirm_theme(modal: Control) -> void:
+	var solid_theme := Theme.new()
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = Color(0.08, 0.09, 0.11, 1.0)
+	panel.content_margin_left = 16
+	panel.content_margin_top = 16
+	panel.content_margin_right = 16
+	panel.content_margin_bottom = 16
+	solid_theme.set_stylebox("panel", "PanelContainer", panel)
+	modal.theme = solid_theme
 
 
 func _on_native_wallet_started(lock: Callable) -> void:

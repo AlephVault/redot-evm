@@ -56,6 +56,10 @@ var _waiting := false
 var _approved := false
 
 
+func _init() -> void:
+	visible = false
+
+
 class ReviewStep:
 	extends TXConfirmModalStep
 

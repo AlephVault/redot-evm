@@ -160,6 +160,7 @@ Runtime behavior differs by target:
 
 - Web exports call `client.initialize()` immediately and show the contract UI after the browser wallet grants account access.
 - Native exports first show `AlephVault__EVM.UI.WalletModal`. Create, restore, or unlock the native wallet there; when the wallet starts successfully, the sample hides the modal and shows the contract UI.
+- Native exports also register `AlephVault__EVM.UI.TXConfirmModal`, so signing, ETH transfers, and SMPL contract transfers require in-app approval before the local wallet signs or submits them.
 - The native UI has a `Lock wallet` button. Locking hides the contract UI and reopens the wallet modal. Web deployments do not show this button because locking/unlocking is wallet-external there.
 
 For native Hardhat testing with the provided dev key, create a text file containing `DEV_ACCOUNT_PRIVATE_KEY`, choose `Restore` in the wallet modal, then unlock with password `default`. This is intended only for local Hardhat development accounts.
