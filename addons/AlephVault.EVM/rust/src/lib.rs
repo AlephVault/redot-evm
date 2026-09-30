@@ -958,6 +958,38 @@ impl AlephVaultEvmNativeWallet {
         let Some(abi) = self.contract_abi(&address) else {
             return failed("invalid_contract");
         };
+        self.contract_invoke_with_abi(address, abi, method_json, params_json, tx_params_json)
+    }
+
+    #[func]
+    // Rationale: direct contract calls reuse a registered ABI key without
+    // requiring a cached address-to-ABI contract entry.
+    fn contract_invoke_direct(
+        &self,
+        address: GString,
+        abi_key: GString,
+        method_json: GString,
+        params_json: GString,
+        tx_params_json: GString,
+    ) -> Dictionary {
+        let address = address.to_string();
+        if !is_non_zero_address(&address) {
+            return failed("invalid_address");
+        }
+        let Some(abi) = self.abi_by_key(&abi_key.to_string()) else {
+            return failed("not_found");
+        };
+        self.contract_invoke_with_abi(address, abi, method_json, params_json, tx_params_json)
+    }
+
+    fn contract_invoke_with_abi(
+        &self,
+        address: String,
+        abi: JsonAbi,
+        method_json: GString,
+        params_json: GString,
+        tx_params_json: GString,
+    ) -> Dictionary {
         let Ok(method) = serde_json::from_str::<Value>(&method_json.to_string()) else {
             return failed("invalid_method");
         };
@@ -1043,6 +1075,40 @@ impl AlephVaultEvmNativeWallet {
         let Some(abi) = self.contract_abi(&address) else {
             return failed("invalid_contract");
         };
+        self.contract_get_events_with_abi(address, abi, event_json, topics_json, from, to)
+    }
+
+    #[func]
+    // Rationale: direct event queries reuse a registered ABI key without
+    // requiring a cached address-to-ABI contract entry.
+    fn contract_get_events_direct(
+        &self,
+        address: GString,
+        abi_key: GString,
+        event_json: GString,
+        topics_json: GString,
+        from: GString,
+        to: GString,
+    ) -> Dictionary {
+        let address = address.to_string();
+        if !is_non_zero_address(&address) {
+            return failed("invalid_address");
+        }
+        let Some(abi) = self.abi_by_key(&abi_key.to_string()) else {
+            return failed("not_found");
+        };
+        self.contract_get_events_with_abi(address, abi, event_json, topics_json, from, to)
+    }
+
+    fn contract_get_events_with_abi(
+        &self,
+        address: String,
+        abi: JsonAbi,
+        event_json: GString,
+        topics_json: GString,
+        from: GString,
+        to: GString,
+    ) -> Dictionary {
         let Ok(event_value) = serde_json::from_str::<Value>(&event_json.to_string()) else {
             return failed("invalid_event");
         };
@@ -1381,6 +1447,10 @@ impl AlephVaultEvmNativeWallet {
     // ABI JSON is keyed separately to allow reuse across many contracts.
     fn contract_abi(&self, address: &str) -> Option<JsonAbi> {
         let key = self.contracts.get(&checksum_or_lower(address))?;
+        self.abi_by_key(key)
+    }
+
+    fn abi_by_key(&self, key: &str) -> Option<JsonAbi> {
         let abi_json = self.abis.get(key)?;
         serde_json::from_str::<JsonAbi>(abi_json).ok()
     }

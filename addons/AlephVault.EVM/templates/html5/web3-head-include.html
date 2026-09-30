@@ -379,6 +379,58 @@ window.alephVaultEvmEthSigUtil = {
 		return contractCache[normalizeAddress(address)] || null;
 	}
 
+	function contractEntryDirect(address, abiKey) {
+		if (!isNonZeroAddress(address)) {
+			throw "invalid_address";
+		}
+		if (!Object.prototype.hasOwnProperty.call(abiCache, abiKey)) {
+			throw "not_found";
+		}
+		return {
+			address: window.web3.utils.toChecksumAddress(address),
+			abiKey: abiKey,
+			abi: abiCache[abiKey],
+			contract: new window.web3.eth.Contract(abiCache[abiKey], address)
+		};
+	}
+
+	function invokeContractEntry(entry, method, params, txParams) {
+		const runner = methodRunner(entry.contract, entry.abi, method, params || []);
+		const state = runner.entry.stateMutability || "nonpayable";
+		if (state === "view" || state === "pure" || runner.entry.constant) {
+			return runner.method.call(normalizeTxConfig(txParams)).then(function (value) {
+				return normalizeContractResult(runner.entry.outputs || [], value);
+			});
+		}
+
+		if (readOnlyProvider) {
+			return reject("read_only");
+		}
+		return sendAndResolveHash(runner.method.send(normalizeTxConfig(txParams)));
+	}
+
+	function getContractEntryEvents(entry, event, topics, fromBlock, toBlock) {
+		const eventEntry = findAbiEntry(entry.abi, "event", event);
+		if (!eventEntry) {
+			return reject("invalid_event");
+		}
+
+		validateBlockRange(fromBlock, toBlock);
+		const filter = {
+			address: entry.address,
+			fromBlock: blockTagValue(fromBlock),
+			toBlock: blockTagValue(toBlock)
+		};
+		const topicValues = normalizeTopics(eventEntry, topics || []);
+		filter.topics = [eventTopic(eventEntry)].concat(topicValues);
+
+		return window.web3.eth.getPastLogs(filter).then(function (logs) {
+			return logs.map(function (log) {
+				return decodeLog(eventEntry, log);
+			});
+		});
+	}
+
 	function methodRunner(contract, abi, method, params) {
 		const entry = findAbiEntry(abi, "function", method);
 		if (!entry) {
@@ -869,19 +921,17 @@ window.alephVaultEvmEthSigUtil = {
 				if (!entry) {
 					return reject("invalid_contract");
 				}
+				return invokeContractEntry(entry, method, params, txParams);
+			} catch (error) {
+				return reject(error);
+			}
+		},
 
-				const runner = methodRunner(entry.contract, entry.abi, method, params || []);
-				const state = runner.entry.stateMutability || "nonpayable";
-				if (state === "view" || state === "pure" || runner.entry.constant) {
-					return runner.method.call(normalizeTxConfig(txParams)).then(function (value) {
-						return normalizeContractResult(runner.entry.outputs || [], value);
-					});
-				}
-
-				if (readOnlyProvider) {
-					return reject("read_only");
-				}
-				return sendAndResolveHash(runner.method.send(normalizeTxConfig(txParams)));
+		contractInvokeDirect: function (address, abiKey, method, params, txParams) {
+			try {
+				ensureReady();
+				const entry = contractEntryDirect(address, abiKey);
+				return invokeContractEntry(entry, method, params, txParams);
 			} catch (error) {
 				return reject(error);
 			}
@@ -894,26 +944,17 @@ window.alephVaultEvmEthSigUtil = {
 				if (!entry) {
 					return reject("invalid_contract");
 				}
+				return getContractEntryEvents(entry, event, topics, fromBlock, toBlock);
+			} catch (error) {
+				return reject(error);
+			}
+		},
 
-				const eventEntry = findAbiEntry(entry.abi, "event", event);
-				if (!eventEntry) {
-					return reject("invalid_event");
-				}
-
-				validateBlockRange(fromBlock, toBlock);
-				const filter = {
-					address: entry.address,
-					fromBlock: blockTagValue(fromBlock),
-					toBlock: blockTagValue(toBlock)
-				};
-				const topicValues = normalizeTopics(eventEntry, topics || []);
-				filter.topics = [eventTopic(eventEntry)].concat(topicValues);
-
-				return window.web3.eth.getPastLogs(filter).then(function (logs) {
-					return logs.map(function (log) {
-						return decodeLog(eventEntry, log);
-					});
-				});
+		contractGetEventsDirect: function (address, abiKey, event, topics, fromBlock, toBlock) {
+			try {
+				ensureReady();
+				const entry = contractEntryDirect(address, abiKey);
+				return getContractEntryEvents(entry, event, topics, fromBlock, toBlock);
 			} catch (error) {
 				return reject(error);
 			}

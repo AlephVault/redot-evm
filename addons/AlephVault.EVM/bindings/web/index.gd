@@ -388,6 +388,11 @@ func contract_invoke(address: String, method: Variant, params: Array, tx_params:
 		return Async.failed("not_ready")
 	return await _promise("window.alephVaultEvmWeb3.contractInvoke(%s, %s, %s, %s)" % [_json(address), _json(method), _json(params), _json(tx_params)])
 
+func contract_invoke_direct(address: String, abi_key: String, method: Variant, params: Array, tx_params: Dictionary):
+	if not _ready:
+		return Async.failed("not_ready")
+	return await _promise("window.alephVaultEvmWeb3.contractInvokeDirect(%s, %s, %s, %s, %s)" % [_json(address), _json(abi_key), _json(method), _json(params), _json(tx_params)])
+
 ## Gets ABI-decoded past events for a cached contract.
 ##
 ## event can be an event name or event ABI entry dictionary. topics can be an
@@ -401,6 +406,15 @@ func contract_get_events(address: String, event: Variant, topics: Variant, from:
 	if not (_is_named_block_tag(to) or _is_prefixed_hex_quantity(to)):
 		return Async.failed("invalid_block_tag")
 	return await _promise("window.alephVaultEvmWeb3.contractGetEvents(%s, %s, %s, %s, %s)" % [_json(address), _json(event), _json(topics), _json(from), _json(to)])
+
+func contract_get_events_direct(address: String, abi_key: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
+	if not _ready:
+		return Async.failed("not_ready")
+	if not (_is_named_block_tag(from) or _is_prefixed_hex_quantity(from)):
+		return Async.failed("invalid_block_tag")
+	if not (_is_named_block_tag(to) or _is_prefixed_hex_quantity(to)):
+		return Async.failed("invalid_block_tag")
+	return await _promise("window.alephVaultEvmWeb3.contractGetEventsDirect(%s, %s, %s, %s, %s, %s)" % [_json(address), _json(abi_key), _json(event), _json(topics), _json(from), _json(to)])
 
 ## Decodes matching logs from a transaction receipt returned by wait_for().
 ##

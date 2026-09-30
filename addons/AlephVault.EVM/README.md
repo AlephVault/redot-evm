@@ -231,7 +231,7 @@ client.confirm_modal = tx_confirm_modal
 
 `confirm_modal` is intended only for native wallets. Assigning it on web pushes a `not_supported` error and leaves the property unchanged because browser wallets provide their own approval dialogs.
 
-When configured, native confirmation is requested for `personal_sign`, `eth_sign`, `eth_signTypedData`, `eth_signTypedData_v3`, `eth_signTypedData_v4`, `eth_signTransaction`, `eth_sendTransaction`, `transfer()`, and native contract transactions through `contract_invoke()`. For `contract_invoke()`, ABI method dictionaries marked `view` or `pure` skip confirmation; string method names are confirmed conservatively because the facade cannot know their mutability before the binding resolves the ABI. The dialog is shown after the incoming request is validated and normalized. Rejection returns `{"ok": false, "error": "user_rejected"}`. Native confirmation currently accepts legacy and EIP-1559 (`0x2`) transaction shapes; access-list/EIP-2930 transactions return `unsupported_transaction_type`.
+When configured, native confirmation is requested for `personal_sign`, `eth_sign`, `eth_signTypedData`, `eth_signTypedData_v3`, `eth_signTypedData_v4`, `eth_signTransaction`, `eth_sendTransaction`, `transfer()`, and native contract transactions through `contract_invoke()` and `contract_invoke_direct()`. For contract invokes, ABI method dictionaries marked `view` or `pure` skip confirmation; string method names are confirmed conservatively because the facade cannot know their mutability before the binding resolves the ABI. The dialog is shown after the incoming request is validated and normalized. Rejection returns `{"ok": false, "error": "user_rejected"}`. Native confirmation currently accepts legacy and EIP-1559 (`0x2`) transaction shapes; access-list/EIP-2930 transactions return `unsupported_transaction_type`.
 
 If `address` is empty, the helper uses the first account returned by `get_accounts()`. `message` can be a `String` or `PackedByteArray`; byte arrays are encoded as `0x`-prefixed hex strings before signing or verification.
 
@@ -311,10 +311,12 @@ Native wallet notes:
 client.contract_create(address, abi_key)
 await client.contract_invoke(address, method, params, tx_params)
 await client.contract_get_events(address, event, topics, from, to)
+await client.contract_invoke_direct(address, abi_key, method, params, tx_params)
+await client.contract_get_events_direct(address, abi_key, event, topics, from, to)
 client.contract_get_tx_events(tx_obj, event)
 ```
 
-`method` and `event` can be a name or an ABI dictionary. Contract view calls may include `block` or `blockTag` in `tx_params`.
+`method` and `event` can be a name or an ABI dictionary. Contract view calls may include `block` or `blockTag` in `tx_params`. The `_direct` variants use a registered `abi_key` directly and do not require `contract_create()`.
 
 ## UI Components
 

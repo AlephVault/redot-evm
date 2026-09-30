@@ -95,7 +95,7 @@ add_child(tx_confirm_modal)
 client.confirm_modal = tx_confirm_modal
 ```
 
-`client.confirm_modal = tx_confirm_modal` is intended for native bindings. Web bindings push `not_supported` and leave the property unchanged. When configured, the modal is shown for native `personal_sign`, `eth_sign`, `eth_signTypedData`, `eth_signTypedData_v3`, `eth_signTypedData_v4`, `eth_signTransaction`, `eth_sendTransaction`, `transfer()`, and `contract_invoke()` calls that are not explicitly known to be `view` or `pure`.
+`client.confirm_modal = tx_confirm_modal` is intended for native bindings. Web bindings push `not_supported` and leave the property unchanged. When configured, the modal is shown for native `personal_sign`, `eth_sign`, `eth_signTypedData`, `eth_signTypedData_v3`, `eth_signTypedData_v4`, `eth_signTransaction`, `eth_sendTransaction`, `transfer()`, `contract_invoke()`, and `contract_invoke_direct()` calls that are not explicitly known to be `view` or `pure`.
 
 The transaction review adapts to legacy and EIP-1559 (`0x2`) gas fields. Access-list/EIP-2930 transactions are rejected before the dialog because the native signer does not currently preserve access lists.
 

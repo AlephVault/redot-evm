@@ -392,6 +392,13 @@ func contract_invoke(address: String, method: Variant, params: Array, tx_params:
 		return Async.failed("not_ready")
 	return _wallet.contract_invoke(address, JSON.stringify(method), JSON.stringify(params), JSON.stringify(tx_params))
 
+func contract_invoke_direct(address: String, abi_key: String, method: Variant, params: Array, tx_params: Dictionary):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	if not _ready:
+		return Async.failed("not_ready")
+	return _wallet.contract_invoke_direct(address, abi_key, JSON.stringify(method), JSON.stringify(params), JSON.stringify(tx_params))
+
 func contract_get_events(address: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
@@ -402,6 +409,17 @@ func contract_get_events(address: String, event: Variant, topics: Variant, from:
 	if not (_is_named_block_tag(to) or _is_prefixed_hex_quantity(to)):
 		return Async.failed("invalid_block_tag")
 	return _wallet.contract_get_events(address, JSON.stringify(event), JSON.stringify(topics), from, to)
+
+func contract_get_events_direct(address: String, abi_key: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	if not _ready:
+		return Async.failed("not_ready")
+	if not (_is_named_block_tag(from) or _is_prefixed_hex_quantity(from)):
+		return Async.failed("invalid_block_tag")
+	if not (_is_named_block_tag(to) or _is_prefixed_hex_quantity(to)):
+		return Async.failed("invalid_block_tag")
+	return _wallet.contract_get_events_direct(address, abi_key, JSON.stringify(event), JSON.stringify(topics), from, to)
 
 func contract_get_tx_events(tx_obj: Dictionary, event: Variant = null):
 	if _wallet == null:

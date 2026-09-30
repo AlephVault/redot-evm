@@ -502,7 +502,21 @@ func _init():
 #     binding resolves overloads. Topics can be an array of up to three
 #     topic values, or a dictionary keyed by valid indexed field names.
 #
-# 45. contract_get_tx_events(
+# 45. (asynchronous) contract_invoke_direct(
+#       address: String, abi_key: String, method: String | Dictionary,
+#       params: Array, tx_params: Dictionary
+#     ) returning:
+#     Same as contract_invoke(), but resolves the contract ABI directly from
+#     abi_key instead of requiring contract_create(address, abi_key) first.
+#
+# 46. (asynchronous) contract_get_events_direct(
+#       address: String, abi_key: String, event: String | Dictionary,
+#       topics: Array | Dictionary, from: String = "0x0", to: String = "latest"
+#     ) returning:
+#     Same as contract_get_events(), but resolves the contract ABI directly
+#     from abi_key instead of requiring contract_create(address, abi_key) first.
+#
+# 47. contract_get_tx_events(
 #       tx_obj: Dictionary, event: String | Dictionary | null = null
 #     ) returning:
 #     - {"ok": true, "value": Array}
@@ -1017,6 +1031,37 @@ func contract_invoke(address: String, method: Variant, params: Array, tx_params:
 ## names. Block tags follow validate_block_tag(tag).
 func contract_get_events(address: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
 	return await _binding.contract_get_events(address, event, topics, from, to)
+
+## Invokes a contract method using a registered ABI key directly.
+##
+## This is equivalent to contract_invoke(), but does not require a prior
+## contract_create() call for the address.
+func contract_invoke_direct(address: String, abi_key: String, method: Variant, params: Array, tx_params: Dictionary):
+	if _uses_native_confirmations() and _contract_invoke_requires_confirmation(method):
+		if not _is_non_zero_address_value(address):
+			return _failed("invalid_address")
+		var normalized_tx_params_response = await _normalize_tx_params_for_confirmation(tx_params)
+		if not normalized_tx_params_response.get("ok", false):
+			return normalized_tx_params_response
+		var normalized_tx_params = normalized_tx_params_response.get("value", {})
+		var confirmation = await _confirm_wallet_request("contract_invoke", {
+			"kind": "contract",
+			"contract": address,
+			"method": method,
+			"params": params,
+			"tx_params": normalized_tx_params,
+		})
+		if not confirmation.get("ok", false):
+			return confirmation
+		tx_params = normalized_tx_params
+	return await _binding.contract_invoke_direct(address, abi_key, method, params, tx_params)
+
+## Gets ABI-decoded events using a registered ABI key directly.
+##
+## This is equivalent to contract_get_events(), but does not require a prior
+## contract_create() call for the address.
+func contract_get_events_direct(address: String, abi_key: String, event: Variant, topics: Variant, from: String = "0x0", to: String = "latest"):
+	return await _binding.contract_get_events_direct(address, abi_key, event, topics, from, to)
 
 ## Decodes matching events from a transaction object returned by wait_for().
 ##
