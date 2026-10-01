@@ -203,12 +203,12 @@ await client.request("eth_signTypedData_v3", [address, typed_data])
 await client.request("eth_signTypedData_v4", [address, typed_data])
 await client.request("eth_signTransaction", [tx_config])
 await client.eth_send_transaction(tx_config)
-client.recover_personal_sign(message, signature)
-client.verify_personal_sign(address, message, signature)
-client.recover_eth_sign(message, signature)
-client.verify_eth_sign(address, message, signature)
-client.recover_eth_sign_typed_data(typed_data, signature)
-client.verify_eth_sign_typed_data(address, typed_data, signature)
+await client.recover_personal_sign(message, signature, ["ecdsa"])
+await client.verify_personal_sign(address, message, signature, ["ecdsa", "erc1271"])
+await client.recover_eth_sign(message, signature, ["erc1271"], address)
+await client.verify_eth_sign(address, message, signature)
+await client.recover_eth_sign_typed_data(typed_data, signature)
+await client.verify_eth_sign_typed_data(address, typed_data, signature)
 await client.recover_eth_send_transaction(tx_hash)
 await client.verify_eth_send_transaction(address, tx_hash)
 ```
@@ -235,9 +235,9 @@ When configured, native confirmation is requested for `personal_sign`, `eth_sign
 
 If `address` is empty, the helper uses the first account returned by `get_accounts()`. `message` can be a `String` or `PackedByteArray`; byte arrays are encoded as `0x`-prefixed hex strings before signing or verification.
 
-Recovery helpers are binding-backed. `recover_personal_sign()`, `recover_eth_sign()`, and `recover_eth_sign_typed_data()` return `{"ok": true, "value": address}` with the recovered signer address. `recover_eth_send_transaction()` returns the sender address reported by `eth_getTransactionByHash` for a submitted transaction hash.
+Recovery helpers are binding-backed and asynchronous. `recover_personal_sign()`, `recover_eth_sign()`, and `recover_eth_sign_typed_data()` return `{"ok": true, "value": address}` with the recovered signer address. They accept `verification_methods`, an array containing `"ecdsa"` and/or `"erc1271"`; omitting it or passing `[]` enables all current methods. ERC-1271 recovery also needs the optional `address` argument and returns that same address when `isValidSignature(bytes32,bytes)` succeeds. `recover_eth_send_transaction()` returns the sender address reported by `eth_getTransactionByHash` for a submitted transaction hash.
 
-Verification helpers exist only in `Web3Client`; bindings expose recovery only. `verify_personal_sign()`, `verify_eth_sign()`, `verify_eth_sign_typed_data()`, and `verify_eth_send_transaction()` compare the recovered address with the expected address and return `{"ok": true, "value": bool}`.
+Verification helpers are asynchronous. `verify_personal_sign()`, `verify_eth_sign()`, `verify_eth_sign_typed_data()`, and `verify_eth_send_transaction()` compare the signer with the expected address and return `{"ok": true, "value": bool}`. The first three accept the same `verification_methods` array and can validate contract wallets through ERC-1271.
 
 `recover_personal_sign()` and `verify_personal_sign()` use the EIP-191/personal-sign message hash. `recover_eth_sign()` and `verify_eth_sign()` use the raw `eth_sign` Keccak message hash. `recover_eth_sign_typed_data()` and `verify_eth_sign_typed_data()` use the EIP-712 typed-data hash. Web typed-data recovery uses `web3.eth.accounts.recoverTypedSignature` when available, otherwise it falls back to the included `@metamask/eth-sig-util` helper. If neither helper is available, typed-data recovery and verification return `incomplete_binding`.
 

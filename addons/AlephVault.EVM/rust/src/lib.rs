@@ -64,6 +64,16 @@ enum PreparedTx {
     Eip1559(TxEip1559),
 }
 
+struct VerificationMethods {
+    ecdsa: bool,
+    erc1271: bool,
+}
+
+enum ContractSignatureError {
+    Validation(&'static str),
+    Rpc(Value),
+}
+
 impl PreparedTx {
     fn signature_hash(&self) -> B256 {
         match self {
@@ -206,36 +216,191 @@ impl AlephVaultEvmNativeWallet {
     }
 
     #[func]
-    // Rationale: exposing recovery directly lets callers compare, display, or
-    // store the signer address without inventing a dummy expected address.
-    fn recover_personal_sign(&self, message: GString, signature: GString) -> Dictionary {
+    // Rationale: contract accounts cannot be recovered from a signature, so
+    // verification checks ECDSA recovery first and then ERC contract validity.
+    fn verify_personal_sign(
+        &self,
+        address: GString,
+        message: GString,
+        signature: GString,
+        verification_methods_json: GString,
+    ) -> Dictionary {
+        let Some(expected) = parse_address(&address.to_string()) else {
+            return failed("invalid_address");
+        };
+        let Some(methods) = verification_methods(&verification_methods_json.to_string()) else {
+            return failed("invalid_verification_methods");
+        };
         let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
             return failed("invalid_message");
         };
-        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
-            return failed("invalid_signature");
-        };
-        match signature.recover_address_from_msg(&bytes) {
-            Ok(recovered) => success(json!(format_address(recovered))),
-            Err(_) => failed("invalid_signature"),
+        let signature_string = signature.to_string();
+        if methods.ecdsa {
+            let Ok(signature) = Signature::from_str(&signature_string) else {
+                if !methods.erc1271 {
+                    return failed("invalid_signature");
+                }
+                return self.verify_contract_signature(
+                    expected,
+                    personal_sign_hash(&bytes),
+                    &signature_string,
+                );
+            };
+            if matches!(signature.recover_address_from_msg(&bytes), Ok(recovered) if recovered == expected)
+            {
+                return success(json!(true));
+            }
         }
+        if methods.erc1271 {
+            return self.verify_contract_signature(
+                expected,
+                personal_sign_hash(&bytes),
+                &signature_string,
+            );
+        }
+        success(json!(false))
+    }
+
+    #[func]
+    // Rationale: exposing recovery directly lets callers compare, display, or
+    // store the signer address without inventing a dummy expected address.
+    fn recover_personal_sign(
+        &self,
+        message: GString,
+        signature: GString,
+        verification_methods_json: GString,
+        address: GString,
+    ) -> Dictionary {
+        let Some(methods) = verification_methods(&verification_methods_json.to_string()) else {
+            return failed("invalid_verification_methods");
+        };
+        let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
+            return failed("invalid_message");
+        };
+        let signature_string = signature.to_string();
+        if methods.ecdsa {
+            if let Ok(signature) = Signature::from_str(&signature_string) {
+                if let Ok(recovered) = signature.recover_address_from_msg(&bytes) {
+                    return success(json!(format_address(recovered)));
+                }
+            }
+        }
+        if methods.erc1271 {
+            return self.recover_contract_signature(
+                address,
+                personal_sign_hash(&bytes),
+                &signature_string,
+            );
+        }
+        failed("invalid_signature")
+    }
+
+    #[func]
+    // Rationale: eth_sign contract verification uses the same raw-message
+    // Keccak prehash as ECDSA eth_sign recovery.
+    fn verify_eth_sign(
+        &self,
+        address: GString,
+        message: GString,
+        signature: GString,
+        verification_methods_json: GString,
+    ) -> Dictionary {
+        let Some(expected) = parse_address(&address.to_string()) else {
+            return failed("invalid_address");
+        };
+        let Some(methods) = verification_methods(&verification_methods_json.to_string()) else {
+            return failed("invalid_verification_methods");
+        };
+        let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
+            return failed("invalid_message");
+        };
+        let hash = B256::from(keccak_bytes(&bytes));
+        let signature_string = signature.to_string();
+        if methods.ecdsa {
+            let Ok(signature) = Signature::from_str(&signature_string) else {
+                if !methods.erc1271 {
+                    return failed("invalid_signature");
+                }
+                return self.verify_contract_signature(expected, hash, &signature_string);
+            };
+            if matches!(signature.recover_address_from_prehash(&hash), Ok(recovered) if recovered == expected)
+            {
+                return success(json!(true));
+            }
+        }
+        if methods.erc1271 {
+            return self.verify_contract_signature(expected, hash, &signature_string);
+        }
+        success(json!(false))
     }
 
     #[func]
     // Rationale: eth_sign signs the Keccak digest of the raw message bytes, so
     // recovery must use the same prehash instead of the EIP-191 message path.
-    fn recover_eth_sign(&self, message: GString, signature: GString) -> Dictionary {
+    fn recover_eth_sign(
+        &self,
+        message: GString,
+        signature: GString,
+        verification_methods_json: GString,
+        address: GString,
+    ) -> Dictionary {
+        let Some(methods) = verification_methods(&verification_methods_json.to_string()) else {
+            return failed("invalid_verification_methods");
+        };
         let Some(bytes) = value_to_bytes(&Value::String(message.to_string())) else {
             return failed("invalid_message");
         };
         let hash = B256::from(keccak_bytes(&bytes));
-        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
-            return failed("invalid_signature");
-        };
-        match signature.recover_address_from_prehash(&hash) {
-            Ok(recovered) => success(json!(format_address(recovered))),
-            Err(_) => failed("invalid_signature"),
+        let signature_string = signature.to_string();
+        if methods.ecdsa {
+            if let Ok(signature) = Signature::from_str(&signature_string) {
+                if let Ok(recovered) = signature.recover_address_from_prehash(&hash) {
+                    return success(json!(format_address(recovered)));
+                }
+            }
         }
+        if methods.erc1271 {
+            return self.recover_contract_signature(address, hash, &signature_string);
+        }
+        failed("invalid_signature")
+    }
+
+    #[func]
+    // Rationale: EIP-712 contract verification uses the typed-data signing hash
+    // for both ECDSA and ERC contract signature checks.
+    fn verify_eth_sign_typed_data(
+        &self,
+        address: GString,
+        typed_data_json: GString,
+        signature: GString,
+        verification_methods_json: GString,
+    ) -> Dictionary {
+        let Some(expected) = parse_address(&address.to_string()) else {
+            return failed("invalid_address");
+        };
+        let Some(methods) = verification_methods(&verification_methods_json.to_string()) else {
+            return failed("invalid_verification_methods");
+        };
+        let Some(hash) = typed_data_hash(&typed_data_json.to_string()) else {
+            return failed("invalid_typed_data");
+        };
+        let signature_string = signature.to_string();
+        if methods.ecdsa {
+            let Ok(signature) = Signature::from_str(&signature_string) else {
+                if !methods.erc1271 {
+                    return failed("invalid_signature");
+                }
+                return self.verify_contract_signature(expected, hash, &signature_string);
+            };
+            if matches!(signature.recover_address_from_prehash(&hash), Ok(recovered) if recovered == expected)
+            {
+                return success(json!(true));
+            }
+        }
+        if methods.erc1271 {
+            return self.verify_contract_signature(expected, hash, &signature_string);
+        }
+        success(json!(false))
     }
 
     #[func]
@@ -245,30 +410,86 @@ impl AlephVaultEvmNativeWallet {
         &self,
         typed_data_json: GString,
         signature: GString,
+        verification_methods_json: GString,
+        address: GString,
     ) -> Dictionary {
-        let Ok(typed_value) = serde_json::from_str::<Value>(&typed_data_json.to_string()) else {
+        let Some(methods) = verification_methods(&verification_methods_json.to_string()) else {
+            return failed("invalid_verification_methods");
+        };
+        let Some(hash) = typed_data_hash(&typed_data_json.to_string()) else {
             return failed("invalid_typed_data");
         };
-        let typed_value = if typed_value.is_string() {
-            match serde_json::from_str::<Value>(typed_value.as_str().unwrap()) {
-                Ok(value) => value,
-                Err(_) => return failed("invalid_typed_data"),
+        let signature_string = signature.to_string();
+        if methods.ecdsa {
+            if let Ok(signature) = Signature::from_str(&signature_string) {
+                if let Ok(recovered) = signature.recover_address_from_prehash(&hash) {
+                    return success(json!(format_address(recovered)));
+                }
             }
-        } else {
-            typed_value
-        };
-        let Ok(typed_data) = serde_json::from_value::<TypedData>(typed_value) else {
-            return failed("invalid_typed_data");
-        };
-        let Ok(hash) = typed_data.eip712_signing_hash() else {
-            return failed("invalid_typed_data");
-        };
-        let Ok(signature) = Signature::from_str(&signature.to_string()) else {
+        }
+        if methods.erc1271 {
+            return self.recover_contract_signature(address, hash, &signature_string);
+        }
+        failed("invalid_signature")
+    }
+
+    fn verify_contract_signature(
+        &self,
+        address: Address,
+        hash: B256,
+        signature: &str,
+    ) -> Dictionary {
+        match self.is_valid_contract_signature(address, hash, signature) {
+            Ok(valid) => success(json!(valid)),
+            Err(ContractSignatureError::Validation(error)) => failed(error),
+            Err(ContractSignatureError::Rpc(error)) => error_response(error),
+        }
+    }
+
+    fn recover_contract_signature(
+        &self,
+        address: GString,
+        hash: B256,
+        signature: &str,
+    ) -> Dictionary {
+        let address_string = address.to_string();
+        if address_string.is_empty() {
             return failed("invalid_signature");
+        }
+        let Some(address) = parse_address(&address_string) else {
+            return failed("invalid_address");
         };
-        match signature.recover_address_from_prehash(&hash) {
-            Ok(recovered) => success(json!(format_address(recovered))),
-            Err(_) => failed("invalid_signature"),
+        match self.is_valid_contract_signature(address, hash, signature) {
+            Ok(true) => success(json!(format_address(address))),
+            Ok(false) => failed("invalid_signature"),
+            Err(ContractSignatureError::Validation(error)) => failed(error),
+            Err(ContractSignatureError::Rpc(error)) => error_response(error),
+        }
+    }
+
+    fn is_valid_contract_signature(
+        &self,
+        address: Address,
+        hash: B256,
+        signature: &str,
+    ) -> Result<bool, ContractSignatureError> {
+        let Some(signature_bytes) = decode_hex_bytes(signature) else {
+            return Err(ContractSignatureError::Validation("invalid_signature"));
+        };
+        let data = erc1271_is_valid_signature_calldata(hash, &signature_bytes);
+        let call = json!({
+            "to": format_address(address),
+            "data": format!("0x{}", hex::encode(data)),
+        });
+        match rpc_request(&self.rpc_url, "eth_call", json!([call, "latest"])) {
+            Ok(Value::String(result)) => {
+                let Some(bytes) = decode_hex_bytes(&result) else {
+                    return Err(ContractSignatureError::Validation("invalid_response"));
+                };
+                Ok(bytes.len() >= 4 && bytes[0..4] == [0x16, 0x26, 0xba, 0x7e])
+            }
+            Ok(_) => Err(ContractSignatureError::Validation("invalid_response")),
+            Err(error) => Err(ContractSignatureError::Rpc(error)),
         }
     }
 
@@ -1674,6 +1895,32 @@ fn value_to_bytes(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
+fn verification_methods(methods_json: &str) -> Option<VerificationMethods> {
+    let value = serde_json::from_str::<Value>(methods_json).ok()?;
+    let Value::Array(methods) = value else {
+        return None;
+    };
+    if methods.is_empty() {
+        return Some(VerificationMethods {
+            ecdsa: true,
+            erc1271: true,
+        });
+    }
+    let mut normalized = VerificationMethods {
+        ecdsa: false,
+        erc1271: false,
+    };
+    for method in methods {
+        let method = method.as_str()?.to_ascii_lowercase();
+        match method.as_str() {
+            "ecdsa" => normalized.ecdsa = true,
+            "erc1271" => normalized.erc1271 = true,
+            _ => return None,
+        }
+    }
+    Some(normalized)
+}
+
 // Rationale: one strict hex decoder prevents each caller from reimplementing
 // prefix, even-length, and hex-character validation.
 fn decode_hex_bytes(hex: &str) -> Option<Vec<u8>> {
@@ -1760,6 +2007,40 @@ fn keccak_bytes(bytes: &[u8]) -> [u8; 32] {
     hasher.update(bytes);
     hasher.finalize(&mut output);
     output
+}
+
+fn personal_sign_hash(bytes: &[u8]) -> B256 {
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", bytes.len());
+    let mut payload = Vec::with_capacity(prefix.len() + bytes.len());
+    payload.extend(prefix.as_bytes());
+    payload.extend(bytes);
+    B256::from(keccak_bytes(&payload))
+}
+
+fn typed_data_hash(typed_data_json: &str) -> Option<B256> {
+    let typed_value = serde_json::from_str::<Value>(typed_data_json).ok()?;
+    let typed_value = if typed_value.is_string() {
+        serde_json::from_str::<Value>(typed_value.as_str().unwrap()).ok()?
+    } else {
+        typed_value
+    };
+    let typed_data = serde_json::from_value::<TypedData>(typed_value).ok()?;
+    typed_data.eip712_signing_hash().ok()
+}
+
+fn erc1271_is_valid_signature_calldata(hash: B256, signature: &[u8]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(4 + 32 + 32 + 32 + padded_len(signature.len()));
+    data.extend([0x16, 0x26, 0xba, 0x7e]);
+    data.extend(hash.as_slice());
+    data.extend(U256::from(64).to_be_bytes::<32>());
+    data.extend(U256::from(signature.len()).to_be_bytes::<32>());
+    data.extend(signature);
+    data.resize(4 + 32 + 32 + 32 + padded_len(signature.len()), 0);
+    data
+}
+
+fn padded_len(len: usize) -> usize {
+    ((len + 31) / 32) * 32
 }
 
 // Rationale: contract invocation must set authoritative to/data/value fields

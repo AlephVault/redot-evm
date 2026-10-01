@@ -283,7 +283,7 @@ func _sign_message() -> void:
 
 
 func _verify_message_signature() -> void:
-	var response = _client.verify_personal_sign(_account, _message_edit.text, _signature_edit.text.strip_edges())
+	var response = await _client.verify_personal_sign(_account, _message_edit.text, _signature_edit.text.strip_edges())
 	if response.get("ok", false):
 		_signature_valid_label.text = "Valid: %s" % str(response.get("value", false))
 	else:
@@ -301,7 +301,7 @@ func _sign_typed_data() -> void:
 
 
 func _verify_typed_data_signature() -> void:
-	var response = _client.verify_eth_sign_typed_data(_account, _typed_data(), _typed_signature_edit.text.strip_edges())
+	var response = await _client.verify_eth_sign_typed_data(_account, _typed_data(), _typed_signature_edit.text.strip_edges())
 	if response.get("ok", false):
 		_typed_signature_valid_label.text = "Valid: %s" % str(response.get("value", false))
 	else:

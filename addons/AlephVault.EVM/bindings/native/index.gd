@@ -133,24 +133,43 @@ func request(method: String, params: Array):
 		return Async.failed("not_ready")
 	return _wallet.request(method, JSON.stringify(params))
 
-func recover_personal_sign(message: Variant, signature: String):
+func verify_personal_sign(address: String, message: Variant, signature: String, verification_methods: Array):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
 	if not (message is String):
 		return Async.failed("invalid_message")
-	return _wallet.recover_personal_sign(message, signature)
+	return _wallet.verify_personal_sign(address, message, signature, JSON.stringify(verification_methods))
 
-func recover_eth_sign(message: Variant, signature: String):
+func recover_personal_sign(message: Variant, signature: String, verification_methods: Array, address: String):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
 	if not (message is String):
 		return Async.failed("invalid_message")
-	return _wallet.recover_eth_sign(message, signature)
+	return _wallet.recover_personal_sign(message, signature, JSON.stringify(verification_methods), address)
 
-func recover_eth_sign_typed_data(typed_data: Variant, signature: String):
+func verify_eth_sign(address: String, message: Variant, signature: String, verification_methods: Array):
 	if _wallet == null:
 		return Async.failed("incomplete_binding")
-	return _wallet.recover_eth_sign_typed_data(JSON.stringify(typed_data), signature)
+	if not (message is String):
+		return Async.failed("invalid_message")
+	return _wallet.verify_eth_sign(address, message, signature, JSON.stringify(verification_methods))
+
+func recover_eth_sign(message: Variant, signature: String, verification_methods: Array, address: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	if not (message is String):
+		return Async.failed("invalid_message")
+	return _wallet.recover_eth_sign(message, signature, JSON.stringify(verification_methods), address)
+
+func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String, verification_methods: Array):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.verify_eth_sign_typed_data(address, JSON.stringify(typed_data), signature, JSON.stringify(verification_methods))
+
+func recover_eth_sign_typed_data(typed_data: Variant, signature: String, verification_methods: Array, address: String):
+	if _wallet == null:
+		return Async.failed("incomplete_binding")
+	return _wallet.recover_eth_sign_typed_data(JSON.stringify(typed_data), signature, JSON.stringify(verification_methods), address)
 
 func recover_eth_send_transaction(tx_hash: String):
 	if _wallet == null:

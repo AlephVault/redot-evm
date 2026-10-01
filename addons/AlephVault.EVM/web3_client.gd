@@ -208,53 +208,62 @@ func _init():
 #     - {"ok": false, "error": Variant}
 #       Where error follows the provider/RPC response.
 #
-# 14. recover_personal_sign(message: String | PackedByteArray, signature: String) returning:
+# 14. (asynchronous) recover_personal_sign(message: String | PackedByteArray, signature: String, verification_methods: Array = [], address: String = "") returning:
 #     - {"ok": true, "value": String}
 #       Where value is the recovered signer address for the
-#       personal_sign/EIP-191 message hash.
+#       personal_sign/EIP-191 message hash, or address when ERC-1271 validates
+#       against that contract address.
 #     - {"ok": false, "error": String}
-#       Where error can be "invalid_message", "invalid_signature", or
+#       Where error can be "invalid_message", "invalid_signature",
+#       "invalid_address", "invalid_verification_methods", or
 #       "incomplete_binding".
 #
-# 15. verify_personal_sign(address: String, message: String | PackedByteArray, signature: String) returning:
+# 15. (asynchronous) verify_personal_sign(address: String, message: String | PackedByteArray, signature: String, verification_methods: Array = []) returning:
 #     - {"ok": true, "value": bool}
 #       Where value is true when signature recovers to address using the
-#       personal_sign/EIP-191 message hash.
+#       personal_sign/EIP-191 message hash, or ERC-1271 validates against
+#       address.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_address", "invalid_message",
-#       "invalid_signature", or "incomplete_binding".
+#       "invalid_signature", "invalid_verification_methods", or
+#       "incomplete_binding".
 #
-# 16. recover_eth_sign(message: String | PackedByteArray, signature: String) returning:
+# 16. (asynchronous) recover_eth_sign(message: String | PackedByteArray, signature: String, verification_methods: Array = [], address: String = "") returning:
 #     - {"ok": true, "value": String}
 #       Where value is the recovered signer address for the raw eth_sign
-#       Keccak message hash.
+#       Keccak message hash, or address when ERC-1271 validates against that
+#       contract address.
 #     - {"ok": false, "error": String}
-#       Where error can be "invalid_message", "invalid_signature", or
+#       Where error can be "invalid_message", "invalid_signature",
+#       "invalid_address", "invalid_verification_methods", or
 #       "incomplete_binding".
 #
-# 17. verify_eth_sign(address: String, message: String | PackedByteArray, signature: String) returning:
+# 17. (asynchronous) verify_eth_sign(address: String, message: String | PackedByteArray, signature: String, verification_methods: Array = []) returning:
 #     - {"ok": true, "value": bool}
 #       Where value is true when signature recovers to address using the raw
-#       eth_sign Keccak message hash.
+#       eth_sign Keccak message hash, or ERC-1271 validates against address.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_address", "invalid_message",
-#       "invalid_signature", or "incomplete_binding".
-#
-# 18. recover_eth_sign_typed_data(typed_data: Dictionary | String, signature: String) returning:
-#     - {"ok": true, "value": String}
-#       Where value is the recovered signer address for the EIP-712 typed-data
-#       hash.
-#     - {"ok": false, "error": String}
-#       Where error can be "invalid_typed_data", "invalid_signature", or
+#       "invalid_signature", "invalid_verification_methods", or
 #       "incomplete_binding".
 #
-# 19. verify_eth_sign_typed_data(address: String, typed_data: Dictionary | String, signature: String) returning:
+# 18. (asynchronous) recover_eth_sign_typed_data(typed_data: Dictionary | String, signature: String, verification_methods: Array = [], address: String = "") returning:
+#     - {"ok": true, "value": String}
+#       Where value is the recovered signer address for the EIP-712 typed-data
+#       hash, or address when ERC-1271 validates against that contract address.
+#     - {"ok": false, "error": String}
+#       Where error can be "invalid_typed_data", "invalid_signature",
+#       "invalid_address", "invalid_verification_methods", or
+#       "incomplete_binding".
+#
+# 19. (asynchronous) verify_eth_sign_typed_data(address: String, typed_data: Dictionary | String, signature: String, verification_methods: Array = []) returning:
 #     - {"ok": true, "value": bool}
 #       Where value is true when signature recovers to address using the
-#       EIP-712 typed-data hash.
+#       EIP-712 typed-data hash, or ERC-1271 validates against address.
 #     - {"ok": false, "error": String}
 #       Where error can be "invalid_address", "invalid_typed_data",
-#       "invalid_signature", or "incomplete_binding".
+#       "invalid_signature", "invalid_verification_methods", or
+#       "incomplete_binding".
 #
 # 20. (asynchronous) recover_eth_send_transaction(tx_hash: String) returning:
 #     - {"ok": true, "value": String}
@@ -723,37 +732,40 @@ func eth_send_transaction(tx_config: Dictionary):
 	return await request("eth_sendTransaction", [tx_config])
 
 ## Verifies a personal_sign signature against an expected address.
-func verify_personal_sign(address: String, message: Variant, signature: String):
-	var recovered = recover_personal_sign(message, signature)
-	return _verify_recovered_address(address, recovered)
+func verify_personal_sign(address: String, message: Variant, signature: String, verification_methods: Array = []):
+	var encoded = _signature_message_value(message)
+	if encoded == null:
+		return _failed("invalid_message")
+	return await _binding.verify_personal_sign(address, encoded, signature, verification_methods)
 
 ## Recovers the signer address from a personal_sign signature.
-func recover_personal_sign(message: Variant, signature: String):
+func recover_personal_sign(message: Variant, signature: String, verification_methods: Array = [], address: String = ""):
 	var encoded = _signature_message_value(message)
 	if encoded == null:
 		return _failed("invalid_message")
-	return _binding.recover_personal_sign(encoded, signature)
+	return await _binding.recover_personal_sign(encoded, signature, verification_methods, address)
 
 ## Verifies an eth_sign signature against an expected address.
-func verify_eth_sign(address: String, message: Variant, signature: String):
-	var recovered = recover_eth_sign(message, signature)
-	return _verify_recovered_address(address, recovered)
-
-## Recovers the signer address from an eth_sign signature.
-func recover_eth_sign(message: Variant, signature: String):
+func verify_eth_sign(address: String, message: Variant, signature: String, verification_methods: Array = []):
 	var encoded = _signature_message_value(message)
 	if encoded == null:
 		return _failed("invalid_message")
-	return _binding.recover_eth_sign(encoded, signature)
+	return await _binding.verify_eth_sign(address, encoded, signature, verification_methods)
+
+## Recovers the signer address from an eth_sign signature.
+func recover_eth_sign(message: Variant, signature: String, verification_methods: Array = [], address: String = ""):
+	var encoded = _signature_message_value(message)
+	if encoded == null:
+		return _failed("invalid_message")
+	return await _binding.recover_eth_sign(encoded, signature, verification_methods, address)
 
 ## Verifies an EIP-712 typed-data signature against an expected address.
-func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String):
-	var recovered = recover_eth_sign_typed_data(typed_data, signature)
-	return _verify_recovered_address(address, recovered)
+func verify_eth_sign_typed_data(address: String, typed_data: Variant, signature: String, verification_methods: Array = []):
+	return await _binding.verify_eth_sign_typed_data(address, typed_data, signature, verification_methods)
 
 ## Recovers the signer address from an EIP-712 typed-data signature.
-func recover_eth_sign_typed_data(typed_data: Variant, signature: String):
-	return _binding.recover_eth_sign_typed_data(typed_data, signature)
+func recover_eth_sign_typed_data(typed_data: Variant, signature: String, verification_methods: Array = [], address: String = ""):
+	return await _binding.recover_eth_sign_typed_data(typed_data, signature, verification_methods, address)
 
 ## Verifies an eth_sendTransaction sender against an expected address.
 func verify_eth_send_transaction(address: String, tx_hash: String):

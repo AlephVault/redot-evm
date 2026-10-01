@@ -13,11 +13,13 @@ read-only HTTP RPC provider.
 <script type="module">
 import {
 	SignTypedDataVersion,
+	TypedDataUtils,
 	recoverTypedSignature
 } from "https://esm.sh/@metamask/eth-sig-util@8.2.0";
 
 window.alephVaultEvmEthSigUtil = {
 	SignTypedDataVersion: SignTypedDataVersion,
+	TypedDataUtils: TypedDataUtils,
 	recoverTypedSignature: recoverTypedSignature
 };
 </script>
@@ -143,6 +145,37 @@ window.alephVaultEvmEthSigUtil = {
 
 	function isRecoverableSignature(signature) {
 		return typeof signature === "string" && /^0x[0-9a-fA-F]{130}$/.test(signature);
+	}
+
+	function isHexBytes(value) {
+		return typeof value === "string" && /^0x([0-9a-fA-F]{2})*$/.test(value);
+	}
+
+	function bytesToHex(value) {
+		return "0x" + Array.from(value).map(function (item) {
+			return Number(item).toString(16).padStart(2, "0");
+		}).join("");
+	}
+
+	function normalizeVerificationMethods(methods) {
+		if (methods === undefined || methods === null || (Array.isArray(methods) && methods.length === 0)) {
+			return { ecdsa: true, erc1271: true };
+		}
+		if (!Array.isArray(methods)) {
+			throw "invalid_verification_methods";
+		}
+		const normalized = { ecdsa: false, erc1271: false };
+		for (let i = 0; i < methods.length; i++) {
+			const method = String(methods[i] || "").toLowerCase();
+			if (method === "ecdsa") {
+				normalized.ecdsa = true;
+			} else if (method === "erc1271") {
+				normalized.erc1271 = true;
+			} else {
+				throw "invalid_verification_methods";
+			}
+		}
+		return normalized;
 	}
 
 	function isValidAbi(abi) {
@@ -582,6 +615,100 @@ window.alephVaultEvmEthSigUtil = {
 		return typeof typedData === "string" ? JSON.parse(typedData) : typedData;
 	}
 
+	function personalSignHash(message) {
+		return window.web3.eth.accounts.hashMessage(message);
+	}
+
+	function ethSignHash(message) {
+		return window.web3.utils.keccak256(message);
+	}
+
+	function typedDataHash(typedData) {
+		if (
+			!window.alephVaultEvmEthSigUtil ||
+			!window.alephVaultEvmEthSigUtil.TypedDataUtils ||
+			typeof window.alephVaultEvmEthSigUtil.TypedDataUtils.eip712Hash !== "function"
+		) {
+			throw "incomplete_binding";
+		}
+		return bytesToHex(window.alephVaultEvmEthSigUtil.TypedDataUtils.eip712Hash(
+			normalizeTypedData(typedData),
+			window.alephVaultEvmEthSigUtil.SignTypedDataVersion.V4
+		));
+	}
+
+	async function isValidContractSignature(address, hash, signature) {
+		if (!isHexBytes(signature) || !/^0x[0-9a-fA-F]{64}$/.test(String(hash))) {
+			throw "invalid_signature";
+		}
+		const data = window.web3.eth.abi.encodeFunctionCall({
+			name: "isValidSignature",
+			type: "function",
+			inputs: [
+				{ type: "bytes32", name: "hash" },
+				{ type: "bytes", name: "signature" }
+			]
+		}, [hash, signature]);
+		try {
+			const result = await window.web3.eth.call({ to: address, data: data });
+			return typeof result === "string" && result.toLowerCase().startsWith("0x1626ba7e");
+		} catch (_error) {
+			return false;
+		}
+	}
+
+	async function verifySignature(address, signature, methods, recover, hash) {
+		ensureReady();
+		if (!isNonZeroAddress(address)) {
+			throw "invalid_address";
+		}
+		const selected = normalizeVerificationMethods(methods);
+		const expected = window.web3.utils.toChecksumAddress(address);
+		if (selected.ecdsa) {
+			try {
+				const recovered = recover();
+				if (normalizeAddress(recovered) === normalizeAddress(expected)) {
+					return true;
+				}
+			} catch (error) {
+				if (error !== "invalid_signature") {
+					throw error;
+				}
+			}
+		}
+		if (selected.erc1271 && await isValidContractSignature(expected, hash(), signature)) {
+			return true;
+		}
+		return false;
+	}
+
+	async function recoverSignature(address, signature, methods, recover, hash) {
+		ensureReady();
+		const selected = normalizeVerificationMethods(methods);
+		if (selected.ecdsa) {
+			try {
+				return window.web3.utils.toChecksumAddress(recover());
+			} catch (error) {
+				if (error !== "invalid_signature") {
+					throw error;
+				}
+			}
+		}
+		if (selected.erc1271) {
+			if (!address) {
+				throw "invalid_signature";
+			}
+			if (!isNonZeroAddress(address)) {
+				throw "invalid_address";
+			}
+			const expected = window.web3.utils.toChecksumAddress(address);
+			if (await isValidContractSignature(expected, hash(), signature)) {
+				return expected;
+			}
+		}
+		throw "invalid_signature";
+	}
+
 	function wrapSync(fn) {
 		try {
 			return jsonStringify(success(fn()));
@@ -809,75 +936,186 @@ window.alephVaultEvmEthSigUtil = {
 			}
 		},
 
-		recoverPersonalSign: function (message, signature) {
-			return wrapSync(function () {
-				ensureReady();
-				if (typeof message !== "string") {
-					throw "invalid_message";
+		verifyPersonalSign: function (address, message, signature, verificationMethods) {
+			return verifySignature(
+				address,
+				signature,
+				verificationMethods,
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					if (typeof signature !== "string") {
+						throw "invalid_signature";
+					}
+					try {
+						return window.web3.eth.accounts.recover(message, signature);
+					} catch (_error) {
+						throw "invalid_signature";
+					}
+				},
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					return personalSignHash(message);
 				}
-				if (typeof signature !== "string") {
-					throw "invalid_signature";
-				}
-				let recovered;
-				try {
-					recovered = window.web3.eth.accounts.recover(message, signature);
-				} catch (_error) {
-					throw "invalid_signature";
-				}
-				return window.web3.utils.toChecksumAddress(recovered);
-			});
+			);
 		},
 
-		recoverEthSign: function (message, signature) {
-			return wrapSync(function () {
-				ensureReady();
-				if (typeof message !== "string") {
-					throw "invalid_message";
+		recoverPersonalSign: function (message, signature, verificationMethods, address) {
+			return recoverSignature(
+				address,
+				signature,
+				verificationMethods,
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					if (typeof signature !== "string") {
+						throw "invalid_signature";
+					}
+					try {
+						return window.web3.eth.accounts.recover(message, signature);
+					} catch (_error) {
+						throw "invalid_signature";
+					}
+				},
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					return personalSignHash(message);
 				}
-				if (typeof signature !== "string") {
-					throw "invalid_signature";
-				}
-				let recovered;
-				try {
-					const hash = window.web3.utils.keccak256(message);
-					recovered = window.web3.eth.accounts.recover(hash, signature, true);
-				} catch (_error) {
-					throw "invalid_signature";
-				}
-				return window.web3.utils.toChecksumAddress(recovered);
-			});
+			);
 		},
 
-		recoverTypedData: function (typedData, signature) {
-			return wrapSync(function () {
-				ensureReady();
-				if (!isRecoverableSignature(signature)) {
-					throw "invalid_signature";
+		verifyEthSign: function (address, message, signature, verificationMethods) {
+			return verifySignature(
+				address,
+				signature,
+				verificationMethods,
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					if (typeof signature !== "string") {
+						throw "invalid_signature";
+					}
+					try {
+						return window.web3.eth.accounts.recover(ethSignHash(message), signature, true);
+					} catch (_error) {
+						throw "invalid_signature";
+					}
+				},
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					return ethSignHash(message);
 				}
-				let recovered;
-				try {
-					if (typeof window.web3.eth.accounts.recoverTypedSignature === "function") {
-						recovered = window.web3.eth.accounts.recoverTypedSignature(typedData, signature);
-					} else if (
-						window.alephVaultEvmEthSigUtil &&
-						typeof window.alephVaultEvmEthSigUtil.recoverTypedSignature === "function"
-					) {
-						recovered = window.alephVaultEvmEthSigUtil.recoverTypedSignature({
-							data: normalizeTypedData(typedData),
-							signature: signature,
-							version: window.alephVaultEvmEthSigUtil.SignTypedDataVersion.V4
-						});
-					} else {
+			);
+		},
+
+		recoverEthSign: function (message, signature, verificationMethods, address) {
+			return recoverSignature(
+				address,
+				signature,
+				verificationMethods,
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					if (typeof signature !== "string") {
+						throw "invalid_signature";
+					}
+					try {
+						return window.web3.eth.accounts.recover(ethSignHash(message), signature, true);
+					} catch (_error) {
+						throw "invalid_signature";
+					}
+				},
+				function () {
+					if (typeof message !== "string") {
+						throw "invalid_message";
+					}
+					return ethSignHash(message);
+				}
+			);
+		},
+
+		verifyTypedData: function (address, typedData, signature, verificationMethods) {
+			return verifySignature(
+				address,
+				signature,
+				verificationMethods,
+				function () {
+					if (!isRecoverableSignature(signature)) {
+						throw "invalid_signature";
+					}
+					try {
+						if (typeof window.web3.eth.accounts.recoverTypedSignature === "function") {
+							return window.web3.eth.accounts.recoverTypedSignature(typedData, signature);
+						}
+						if (
+							window.alephVaultEvmEthSigUtil &&
+							typeof window.alephVaultEvmEthSigUtil.recoverTypedSignature === "function"
+						) {
+							return window.alephVaultEvmEthSigUtil.recoverTypedSignature({
+								data: normalizeTypedData(typedData),
+								signature: signature,
+								version: window.alephVaultEvmEthSigUtil.SignTypedDataVersion.V4
+							});
+						}
 						throw "incomplete_binding";
+					} catch (error) {
+						if (error === "incomplete_binding") {
+							throw error;
+						}
+						throw "invalid_typed_data";
 					}
-				} catch (error) {
-					if (error === "incomplete_binding") {
-						throw error;
-					}
-					throw "invalid_typed_data";
+				},
+				function () {
+					return typedDataHash(typedData);
 				}
-				return window.web3.utils.toChecksumAddress(recovered);
-			});
+			);
+		},
+
+		recoverTypedData: function (typedData, signature, verificationMethods, address) {
+			return recoverSignature(
+				address,
+				signature,
+				verificationMethods,
+				function () {
+					if (!isRecoverableSignature(signature)) {
+						throw "invalid_signature";
+					}
+					try {
+						if (typeof window.web3.eth.accounts.recoverTypedSignature === "function") {
+							return window.web3.eth.accounts.recoverTypedSignature(typedData, signature);
+						}
+						if (
+							window.alephVaultEvmEthSigUtil &&
+							typeof window.alephVaultEvmEthSigUtil.recoverTypedSignature === "function"
+						) {
+							return window.alephVaultEvmEthSigUtil.recoverTypedSignature({
+								data: normalizeTypedData(typedData),
+								signature: signature,
+								version: window.alephVaultEvmEthSigUtil.SignTypedDataVersion.V4
+							});
+						}
+						throw "incomplete_binding";
+					} catch (error) {
+						if (error === "incomplete_binding") {
+							throw error;
+						}
+						throw "invalid_typed_data";
+					}
+				},
+				function () {
+					return typedDataHash(typedData);
+				}
+			);
 		},
 
 		recoverSentTransaction: async function (txHash) {
